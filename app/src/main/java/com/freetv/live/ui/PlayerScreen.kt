@@ -23,6 +23,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Cast
+import androidx.compose.material.icons.filled.CastConnected
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Star
@@ -86,6 +88,9 @@ fun PlayerScreen(vm: TvViewModel, onExit: () -> Unit) {
     val queue by vm.queue.collectAsState()
     val index by vm.playing.collectAsState()
     val favorites by vm.favorites.collectAsState()
+    val castTarget by vm.castTarget.collectAsState()
+    val castMessage by vm.castMessage.collectAsState()
+    var showCast by remember { mutableStateOf(false) }
     val i = index ?: return
     val channel = queue.getOrNull(i) ?: return
 
@@ -170,8 +175,8 @@ fun PlayerScreen(vm: TvViewModel, onExit: () -> Unit) {
 
     // Watchdog: some dead servers accept the connection and then send nothing, which never
     // raises a player error. Treat a stream that stays stuck loading as failed.
-    LaunchedEffect(channel.url, restartKey, forceProgressive, buffering, played, error, reconnectAt) {
-        if (!buffering || error != null || reconnectAt != null) return@LaunchedEffect
+    LaunchedEffect(channel.url, restartKey, forceProgressive, buffering, played, error, reconnectAt, castTarget) {
+        if (castTarget != null || !buffering || error != null || reconnectAt != null) return@LaunchedEffect
         delay(if (played) STALL_TIMEOUT_MS else STARTUP_TIMEOUT_MS)
         when {
             played -> scheduleReconnect("stalled")
@@ -187,8 +192,15 @@ fun PlayerScreen(vm: TvViewModel, onExit: () -> Unit) {
         restartKey++
     }
 
-    LaunchedEffect(channel.url, forceProgressive, restartKey) {
+    LaunchedEffect(channel.url, forceProgressive, restartKey, castTarget) {
         error = null
+        if (castTarget != null) {
+            // The Roku plays the stream; this device just acts as the remote.
+            player.stop()
+            buffering = false
+            reconnectAt = null
+            return@LaunchedEffect
+        }
         buffering = true
         startChannel(player, channel, forceProgressive)
         if (restartKey == 0) {
@@ -254,7 +266,21 @@ fun PlayerScreen(vm: TvViewModel, onExit: () -> Unit) {
             modifier = Modifier.fillMaxSize(),
         )
 
-        if ((buffering || reconnectAt != null) && error == null) {
+        castTarget?.let { device ->
+            Column(
+                Modifier.align(Alignment.Center).padding(32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Icon(Icons.Default.CastConnected, null, tint = Accent, modifier = Modifier.padding(8.dp))
+                Text(channel.name, color = Color.White, style = MaterialTheme.typography.headlineSmall)
+                Text(castMessage ?: "Playing on ${device.name}", color = Color(0xFFBBBBCC),
+                    style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.padding(6.dp))
+                OutlinedButton(onClick = vm::stopCasting) { Text("Stop casting", color = Color.White) }
+            }
+        }
+
+        if (castTarget == null && (buffering || reconnectAt != null) && error == null) {
             Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
                 CircularProgressIndicator(color = Accent)
                 if (reconnectAt != null || retries > 0) {
@@ -283,6 +309,8 @@ fun PlayerScreen(vm: TvViewModel, onExit: () -> Unit) {
             }
         }
 
+        if (showCast) CastDialog(vm, onDismiss = { showCast = false })
+
         if (digits.isNotEmpty()) {
             Text(
                 digits,
@@ -300,6 +328,17 @@ fun PlayerScreen(vm: TvViewModel, onExit: () -> Unit) {
                     onClick = { vm.stop(); onExit() },
                     modifier = Modifier.align(Alignment.TopStart).padding(16.dp).background(Color(0x88000000), RoundedCornerShape(50)),
                 ) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White) }
+
+                IconButton(
+                    onClick = { showCast = true },
+                    modifier = Modifier.align(Alignment.TopEnd).padding(16.dp).background(Color(0x88000000), RoundedCornerShape(50)),
+                ) {
+                    Icon(
+                        if (castTarget != null) Icons.Default.CastConnected else Icons.Default.Cast,
+                        "Cast to Roku",
+                        tint = if (castTarget != null) Accent else Color.White,
+                    )
+                }
 
                 Column(
                     Modifier.align(Alignment.CenterEnd).padding(16.dp),

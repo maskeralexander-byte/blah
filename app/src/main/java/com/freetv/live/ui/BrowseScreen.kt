@@ -23,6 +23,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Cast
+import androidx.compose.material.icons.filled.CastConnected
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
@@ -36,6 +38,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
@@ -184,6 +187,16 @@ private fun ChannelPane(vm: TvViewModel, onMenu: (() -> Unit)?, onOpenSources: (
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 shape = RoundedCornerShape(12.dp),
             )
+            val castTarget by vm.castTarget.collectAsState()
+            var showCast by remember { mutableStateOf(false) }
+            IconButton(onClick = { showCast = true }) {
+                Icon(
+                    if (castTarget != null) Icons.Default.CastConnected else Icons.Default.Cast,
+                    "Cast to Roku",
+                    tint = if (castTarget != null) Accent else LocalContentColor.current,
+                )
+            }
+            if (showCast) CastDialog(vm, onDismiss = { showCast = false })
             IconButton(onClick = { vm.refresh(force = true) }) { Icon(Icons.Default.Refresh, "Refresh") }
             IconButton(onClick = onOpenSources) { Icon(Icons.Default.Settings, "Sources") }
         }

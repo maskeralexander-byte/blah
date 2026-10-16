@@ -42,6 +42,19 @@ least reliable streams, and the app makes no attempt to keep them working.
 - Tap ☰ for categories and countries, search at the top.
 - While watching, tap the screen to show the controls (back, channel arrows, ★).
 
+## Casting to a Roku
+
+Tap the cast icon (top bar, or top-right while watching) to pick a Roku on the same Wi-Fi. The
+Roku plays the stream in its built-in media player, and your phone becomes the remote: changing
+channels in the app changes them on the TV. Uses Roku's External Control Protocol, so no Roku
+app needs to be installed.
+
+- If no Roku shows up, enter its IP address (on the Roku: Settings → Network → About).
+- If the Roku refuses, set Settings → System → Advanced system settings → Control by mobile apps →
+  Network access to **Default** or **Permissive**.
+- Channels that need custom headers (user agent / referrer) may not load on Roku, which can't
+  send them.
+
 ## Building
 
 Requires JDK 17+ and the Android SDK (platform 35).

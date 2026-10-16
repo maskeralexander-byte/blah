@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import com.freetv.live.data.Channel
 import com.freetv.live.data.ChannelRepository
 import com.freetv.live.data.PlaylistSource
+import com.freetv.live.data.RokuCaster
+import com.freetv.live.data.RokuDevice
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -32,6 +34,8 @@ data class Facet(val section: Section, val label: String, val count: Int)
 
 class TvViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = ChannelRepository(app)
+    private val caster = RokuCaster(app)
+    private val castPrefs = app.getSharedPreferences("cast", android.content.Context.MODE_PRIVATE)
 
     private val _channels = MutableStateFlow<List<Channel>>(emptyList())
     val channels: StateFlow<List<Channel>> = _channels.asStateFlow()
@@ -184,9 +188,86 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
         _playing.value = i
         repo.addRecent(q[i].url)
         _recents.value = repo.recents()
+        sendToRoku()
     }
 
     fun stop() { _playing.value = null }
+
+    // ---- Casting to Roku ----
+
+    private val _rokus = MutableStateFlow<List<RokuDevice>>(emptyList())
+    val rokus: StateFlow<List<RokuDevice>> = _rokus.asStateFlow()
+
+    private val _scanning = MutableStateFlow(false)
+    val scanning: StateFlow<Boolean> = _scanning.asStateFlow()
+
+    /** The Roku that channel changes go to, or null when playing on this device. */
+    private val _castTarget = MutableStateFlow<RokuDevice?>(null)
+    val castTarget: StateFlow<RokuDevice?> = _castTarget.asStateFlow()
+
+    private val _castMessage = MutableStateFlow<String?>(null)
+    val castMessage: StateFlow<String?> = _castMessage.asStateFlow()
+
+    fun scanRokus() {
+        if (_scanning.value) return
+        viewModelScope.launch {
+            _scanning.value = true
+            _castMessage.value = null
+            val found = caster.discover().toMutableList()
+            // Discovery can miss devices on some routers; also try the last Roku used.
+            castPrefs.getString("last_host", null)?.let { last ->
+                if (found.none { it.host == last }) caster.probe(last)?.let(found::add)
+            }
+            _rokus.value = found
+            if (found.isEmpty()) _castMessage.value = "No Roku found. Make sure your phone is on the same Wi-Fi, or enter the Roku's IP address."
+            _scanning.value = false
+        }
+    }
+
+    fun addRokuByIp(ip: String) {
+        viewModelScope.launch {
+            _scanning.value = true
+            val device = caster.probe(ip)
+            if (device == null) {
+                _castMessage.value = "No Roku answered at $ip. Find its IP on the Roku under Settings → Network → About."
+            } else {
+                _rokus.value = (_rokus.value.filterNot { it.host == device.host } + device)
+                castTo(device)
+            }
+            _scanning.value = false
+        }
+    }
+
+    fun castTo(device: RokuDevice) {
+        _castTarget.value = device
+        castPrefs.edit().putString("last_host", device.host).apply()
+        sendToRoku()
+    }
+
+    fun stopCasting() {
+        val device = _castTarget.value ?: return
+        _castTarget.value = null
+        _castMessage.value = null
+        viewModelScope.launch { runCatching { caster.stop(device) } }
+    }
+
+    private fun sendToRoku() {
+        val device = _castTarget.value ?: return
+        val channel = _playing.value?.let { _queue.value.getOrNull(it) } ?: return
+        viewModelScope.launch {
+            _castMessage.value = "Sending ${channel.name} to ${device.name}…"
+            _castMessage.value = try {
+                caster.play(device, channel)
+                if (channel.userAgent != null || channel.referrer != null) {
+                    "Playing on ${device.name}. This channel needs special headers, so it may not load on Roku."
+                } else {
+                    "Playing on ${device.name}"
+                }
+            } catch (e: Exception) {
+                "Couldn't reach ${device.name}: ${e.message ?: e.javaClass.simpleName}"
+            }
+        }
+    }
 
     fun setSourceEnabled(id: String, enabled: Boolean) {
         repo.setSourceEnabled(id, enabled)
