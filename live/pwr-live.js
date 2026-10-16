@@ -409,67 +409,91 @@ function setFocus(st) {
 }
 
 /* ---------- Background tabs ----------
-   PWR tabs you add are reloaded in a hidden frame on a schedule and read the same way as the
-   screen you're on: the same as opening the tab yourself. Nothing is clicked or submitted. */
+   PWR switches most tabs without changing the page address, so a tab can't be loaded by address.
+   Instead PWR Live opens PWR in an invisible frame, taps the tab names you added (in that hidden
+   copy only, never on your screen), waits for the table and reads it. It taps nothing else: no
+   buttons, filters or forms. Tabs that do have their own address are simply loaded. */
 let screens = [];
-try { screens = JSON.parse(localStorage.getItem("pwrLive.screens") || "[]"); } catch (e) {}
+try { screens = JSON.parse(localStorage.getItem("pwrLive.screens2") || "[]"); } catch (e) {}
 let bgEvery = 3;
 try { bgEvery = +(localStorage.getItem("pwrLive.bgEvery") || 3); } catch (e) {}
-const saveScreens = () => { try { localStorage.setItem("pwrLive.screens", JSON.stringify(screens)); localStorage.setItem("pwrLive.bgEvery", String(bgEvery)); } catch (e) {} };
+const saveScreens = () => { try { localStorage.setItem("pwrLive.screens2", JSON.stringify(screens)); localStorage.setItem("pwrLive.bgEvery", String(bgEvery)); } catch (e) {} };
 const currentUrl = () => { try { return frame ? frame.contentWindow.location.href : location.href; } catch (e) { return location.href; } };
 const currentDoc = () => { try { return frame ? frame.contentDocument : document; } catch (e) { return document; } };
 const cleanUrl = u => { try { const x = new URL(u, location.href); x.hash = ""; return x.href; } catch (e) { return null; } };
-function addScreen(url, name) {
-  url = cleanUrl(url); if (!url) return "That tab doesn't have its own address.";
-  if (new URL(url).origin !== location.origin) return "That tab is on another site, so it can't be loaded here.";
-  const dup = screens.find(s => s.url === url);
-  if (dup) return dup.name === name ? `${name} is already added.` : `${name} has the same address as ${dup.name}: PWR switches it without changing the address, so it can't be loaded on its own.`;
-  screens.push({ url, name: name || url }); saveScreens(); bgSoon(); return `Added ${name}. It's read every ${bgEvery} min.`;
+const screenKey = s => s.url + "|" + (s.click || "");
+function addScreen(s) {
+  const url = cleanUrl(s.url); if (!url || new URL(url).origin !== location.origin) return `${s.name} can't be read from here.`;
+  const item = { url, name: s.name, click: s.click || null };
+  if (screens.some(x => screenKey(x) === screenKey(item))) return `${s.name} is already added.`;
+  screens.push(item); saveScreens(); bgSoon();
+  return `Added ${s.name}. It's read every ${bgEvery} min.`;
 }
-// Tabs on the current screen that have their own address (javascript: tabs can't be loaded separately).
+// Tab and menu names on the current screen.
+const NAV_RE = /sales|labor|hourly|summary|schedule|service|keys|real time|delivery|orders|oven|dispatch|makeline|load/i;
+function navTargets(d) {
+  return [...d.querySelectorAll('a, [role="tab"], li')].filter(el => !(el.tagName === "LI" && el.querySelector("a, [role='tab']")) && !el.closest("form button, [data-pwr-live]"));
+}
 function tabLinks() {
-  const out = [], seen = new Set();
-  for (const d of docs(currentDoc() || document)) for (const a of d.querySelectorAll("a[href]")) {
-    const text = cellText(a), href = a.getAttribute("href") || "";
-    if (!text || text.length > 40 || !/sales|labor|hourly|summary|schedule|service|keys|real time|delivery|orders|map/i.test(text)) continue;
-    if (/^\s*javascript:|^#/.test(href)) { out.push({ name: text, url: null }); continue; }
-    const u = cleanUrl(a.href); if (!u || seen.has(u) || new URL(u).origin !== location.origin) continue;
-    seen.add(u); out.push({ name: text, url: u });
+  const out = [], seen = new Set(), base = cleanUrl(currentUrl());
+  for (const d of docs(currentDoc() || document)) for (const el of navTargets(d)) {
+    const text = cellText(el);
+    if (!text || text.length > 40 || seen.has(text) || !NAV_RE.test(text)) continue;
+    seen.add(text);
+    const href = el.tagName === "A" ? (el.getAttribute("href") || "") : "";
+    const u = href && !/^\s*javascript:|^#/.test(href) && el.target !== "_blank" ? cleanUrl(el.href) : null;
+    if (u && new URL(u).origin === location.origin && u !== base) out.push({ name: text, url: u, click: null });
+    else out.push({ name: text, url: base, click: text });
   }
   return out;
 }
-function bgLoad(s) {
-  return new Promise(res => {
-    const f = document.createElement("iframe");
-    f.setAttribute("data-pwr-bg", ""); f.setAttribute("aria-hidden", "true"); f.tabIndex = -1;
-    // On screen but invisible, so grids that only draw visible rows still draw.
-    f.style.cssText = "position:fixed;inset:0;width:100%;height:100%;border:0;opacity:0;pointer-events:none;z-index:-1;";
-    let done = false;
-    const finish = out => { if (done) return; done = true; clearTimeout(limit); f.remove(); res(out); };
-    const limit = setTimeout(() => finish({ err: "took too long to load" }), 45000);
-    f.addEventListener("load", () => setTimeout(() => {
-      try {
-        const d = f.contentDocument;
-        if (!d || !d.body) return finish({ err: "couldn't be read" });
-        if ([...d.querySelectorAll('input[type="password"]')].length) return finish({ err: "PWR asked to sign in" });
-        const sc = scan(docs(d));
-        finish(sc.parsed.length || sc.hourly ? sc : { err: "no table found" });
-      } catch (e) { finish({ err: e.message }); }
-    }, 6000));
-    f.src = s.url;
-    (document.body || document.documentElement).append(f);
-  });
+const pause = ms => new Promise(r => setTimeout(r, ms));
+// Wait for the hidden frame to settle: a full page load (PWR postback) or an in-page redraw.
+function settle(f, ms) {
+  return new Promise(res => { let t; const done = () => { clearTimeout(t); f.removeEventListener("load", onLoad); res(); }; const onLoad = () => { clearTimeout(t); t = setTimeout(done, 4000); }; f.addEventListener("load", onLoad); t = setTimeout(done, ms); });
+}
+async function bgGroup(url, items, results) {
+  const f = document.createElement("iframe");
+  f.setAttribute("data-pwr-bg", ""); f.setAttribute("aria-hidden", "true"); f.tabIndex = -1;
+  // On screen but invisible, so grids that only draw visible rows still draw.
+  f.style.cssText = "position:fixed;inset:0;width:100%;height:100%;border:0;opacity:0;pointer-events:none;z-index:-1;";
+  const loaded = new Promise(res => { f.addEventListener("load", res, { once: true }); setTimeout(res, 40000); });
+  f.src = url;
+  (document.body || document.documentElement).append(f);
+  try {
+    await loaded; await pause(4000);
+    for (const s of items) {
+      L.bgActive = s.name; render();
+      let d = f.contentDocument;
+      if (!d || !d.body) { results[screenKey(s)] = { err: "couldn't be read" }; continue; }
+      if (d.querySelector('input[type="password"]')) { results[screenKey(s)] = { err: "PWR asked to sign in" }; break; }
+      if (s.click) {
+        const el = docs(d).flatMap(navTargets).find(x => cellText(x) === s.click);
+        if (!el) { results[screenKey(s)] = { err: "tab not found" }; continue; }
+        el.click(); // PWR's own tab switch, in the hidden copy only
+        await settle(f, 7000);
+        d = f.contentDocument;
+      }
+      const sc = d ? scan(docs(d)) : { parsed: [] };
+      results[screenKey(s)] = sc.parsed.length || sc.hourly ? sc : { err: "no table found" };
+    }
+  } catch (e) { for (const s of items) if (!results[screenKey(s)]) results[screenKey(s)] = { err: e.message }; }
+  f.remove();
 }
 let bgRunning = false, bgTimer = null;
 async function bgCycle() {
   if (bgRunning || !screens.length) return;
   bgRunning = true;
-  for (const s of [...screens]) {
-    if (cleanUrl(currentUrl()) === s.url) continue; // already reading it live
-    L.bgActive = s.name; render();
-    const out = await bgLoad(s);
-    L.bg[s.url] = { t: Date.now(), name: s.name, parsed: out.parsed || null, err: out.err || null };
-    if (out.hourly) saveHourly(out.hourly);
+  const groups = new Map();
+  for (const s of screens) { if (!groups.has(s.url)) groups.set(s.url, []); groups.get(s.url).push(s); }
+  for (const [url, items] of groups) {
+    const results = {};
+    await bgGroup(url, items, results);
+    for (const s of items) {
+      const out = results[screenKey(s)] || { err: "not read" };
+      L.bg[screenKey(s)] = { t: Date.now(), name: s.name, parsed: out.parsed && out.parsed.length ? out.parsed : null, err: out.err || null };
+      if (out.hourly) saveHourly(out.hourly);
+    }
   }
   L.bgActive = null; bgRunning = false; save(); tick();
 }
@@ -802,7 +826,7 @@ function render() {
   const body = h("div", { class: "body" });
   panel.append(body);
 
-  body.append(h("div", { class: "ro" }, h("b", null, "Read-only."), "Reads this page; never clicks, changes, or sends anything. Checks every",
+  body.append(h("div", { class: "ro" }, h("b", null, "Read-only."), "Reads PWR; never changes or submits anything. Checks every",
     h("select", { "aria-label": "Check interval", onchange: e => { L.interval = +e.target.value; restart(); } },
       [5, 15, 30, 60].map(n => h("option", { value: n, selected: n === L.interval ? "" : null }, n < 60 ? `${n} sec` : "1 min")))));
 
@@ -816,23 +840,22 @@ function render() {
   const bgBox = h("details", { class: "ro", style: "display:block" }, h("summary", { style: "cursor:pointer;font-weight:600" },
     `Background tabs (${screens.length})` + (L.bgActive ? ` · reading ${L.bgActive}…` : "")));
   bgBox.open = !!L.bgOpen; bgBox.addEventListener("toggle", () => { L.bgOpen = bgBox.open; });
-  bgBox.append(h("div", { class: "muted", style: "margin:6px 0" }, "Tabs added here are reloaded and read in the background, so you don't have to open them. It's the same as opening the tab yourself; nothing is clicked or submitted."));
+  bgBox.append(h("div", { class: "muted", style: "margin:6px 0" }, "Tabs added here are read in the background so you don't have to open them. PWR Live opens PWR in a hidden copy, taps only the tab names you add there (never on your screen, and never buttons or filters), and reads the table."));
   for (const s of screens) {
-    const b = L.bg[s.url];
+    const b = L.bg[screenKey(s)];
     bgBox.append(h("div", { class: "row", style: "justify-content:space-between" }, h("span", null, h("b", null, s.name), " ",
       h("span", { class: "muted" }, b ? (b.err ? `· ${b.err} (${ago(b.t)})` : `· read ${ago(b.t)}`) : "· waiting")),
-      h("button", { class: "btn", type: "button", "aria-label": `Remove ${s.name}`, onclick: () => { screens = screens.filter(x => x !== s); delete L.bg[s.url]; saveScreens(); save(); render(); } }, "Remove")));
+      h("button", { class: "btn", type: "button", "aria-label": `Remove ${s.name}`, onclick: () => { screens = screens.filter(x => x !== s); delete L.bg[screenKey(s)]; saveScreens(); save(); render(); } }, "Remove")));
   }
   const addMsg = m => { L.bgMsg = m; render(); };
-  const curName = (() => { try { const d = currentDoc(); return (d && d.title) || "This screen"; } catch (e) { return "This screen"; } })();
   bgBox.append(h("div", { class: "row", style: "margin-top:6px" },
-    h("button", { class: "btn", type: "button", onclick: () => addMsg(addScreen(currentUrl(), curName)) }, "Add this screen"),
     h("label", { class: "muted", for: "bgEvery" }, "Read every"),
     h("select", { id: "bgEvery", onchange: e => { bgEvery = +e.target.value; saveScreens(); render(); } }, [2, 3, 5, 10, 15].map(n => h("option", { value: n, selected: n === bgEvery ? "" : null }, `${n} min`)))));
   const links = tabLinks();
-  if (links.length) bgBox.append(h("div", { class: "muted", style: "margin-top:6px" }, "Tabs on this page:"),
-    h("div", { class: "row" }, links.map(l => h("button", { class: "btn", type: "button", disabled: l.url ? null : "", title: l.url ? null : "This tab has no address of its own, so it can't be read in the background",
-      onclick: () => addMsg(addScreen(l.url, l.name)) }, (l.url ? "+ " : "") + l.name))));
+  const added = new Set(screens.map(screenKey));
+  if (links.length) bgBox.append(h("div", { class: "muted", style: "margin-top:6px" }, "Tap a tab to read it in the background:"),
+    h("div", { class: "row" }, links.filter(l => !added.has(screenKey({ url: cleanUrl(l.url), click: l.click }))).map(l => h("button", { class: "btn", type: "button",
+      onclick: () => addMsg(addScreen(l)) }, "+ " + l.name))));
   if (L.bgMsg) bgBox.append(h("div", { class: "muted", style: "margin-top:6px" }, L.bgMsg));
   body.append(bgBox);
 
