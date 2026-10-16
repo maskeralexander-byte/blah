@@ -310,12 +310,12 @@ function readTiles(d) {
 
 /* ---------- Session history ---------- */
 const KEY = "pwrLive.v1";
-const L = { snaps: [], cols: [], colSeen: {}, raw: {}, checkedAt: null, lastChangeAt: {}, interval: 15, sort: null, sortDir: -1, metric: null, mini: false, err: "" };
+const L = { snaps: [], cols: [], colSeen: {}, raw: {}, acc: {}, accLog: [], checkedAt: null, lastChangeAt: {}, interval: 15, sort: null, sortDir: -1, metric: null, mini: false, err: "" };
 try {
   const saved = JSON.parse(sessionStorage.getItem(KEY) || "null");
-  if (saved && saved.snaps && saved.snaps.length && Date.now() - saved.snaps[saved.snaps.length - 1].t < 2 * 3600e3) Object.assign(L, { snaps: saved.snaps, cols: saved.cols || [], colSeen: saved.colSeen || {}, raw: saved.raw || {}, lastChangeAt: saved.lastChangeAt || {} });
+  if (saved && saved.snaps && saved.snaps.length && Date.now() - saved.snaps[saved.snaps.length - 1].t < 2 * 3600e3) Object.assign(L, { snaps: saved.snaps, cols: saved.cols || [], colSeen: saved.colSeen || {}, raw: saved.raw || {}, acc: saved.acc || {}, accLog: saved.accLog || [], lastChangeAt: saved.lastChangeAt || {} });
 } catch (e) { /* storage blocked: history lasts until the page reloads */ }
-const save = () => { try { sessionStorage.setItem(KEY, JSON.stringify({ snaps: L.snaps.slice(-720), cols: L.cols, colSeen: L.colSeen, raw: L.raw, lastChangeAt: L.lastChangeAt })); } catch (e) {} };
+const save = () => { try { sessionStorage.setItem(KEY, JSON.stringify({ snaps: L.snaps.slice(-720), cols: L.cols, colSeen: L.colSeen, raw: L.raw, acc: L.acc, accLog: L.accLog, lastChangeAt: L.lastChangeAt })); } catch (e) {} };
 
 // Year-over-year %, SPLH (sales ÷ labor hours), and projected end of day (today × last year's full day ÷ last year so far).
 function addDerived(data) {
@@ -370,6 +370,7 @@ function tick() {
     if (L.snaps.length > 720) L.snaps.splice(0, L.snaps.length - 720);
     save();
   }
+  trackLabor(data, L.checkedAt);
   if (!L.metric || !L.cols.some(c => c.id === L.metric)) L.metric = (L.cols.find(c => c.key === "pcya") || L.cols.find(c => c.key === "sales") || L.cols[0]).id;
   render();
 }
@@ -412,7 +413,7 @@ function pace(st) {
 
 // Column choices made in the panel (for example "this column is labor hours"), kept in this browser.
 let manual = {};
-try { manual = JSON.parse(localStorage.getItem("pwrLive.manual") || "{}"); } catch (e) {}
+try { manual = JSON.parse(localStorage.getItem("pwrLive.manual2") || "{}"); } catch (e) {}
 function applyManual() {
   for (const [key, id] of Object.entries(manual)) {
     if (!L.cols.some(c => c.id === id)) continue;
@@ -421,7 +422,7 @@ function applyManual() {
 }
 function setManual(key, id) {
   if (id) manual[key] = id; else delete manual[key];
-  try { localStorage.setItem("pwrLive.manual", JSON.stringify(manual)); } catch (e) {}
+  try { localStorage.setItem("pwrLive.manual2", JSON.stringify(manual)); } catch (e) {}
   L.cols = L.cols.filter(c => !c.derived); // recompute derived columns
   const last = latest(); if (last) { applyManual(); addDerived(last.data); }
   render();
@@ -430,21 +431,88 @@ function setManual(key, id) {
 // SPLH goal: from the analyzer's Targets, or set right in the panel (kept in this browser).
 let splhGoal = TGT.splh ?? null;
 try { const g = localStorage.getItem("pwrLive.splhGoal"); if (g) splhGoal = +g; } catch (e) {}
-// SPLH over the last 30 min: new sales ÷ new labor hours. Shows whether staffing right now fits sales right now.
+/* ---------- Live labor and SPLH ----------
+   PWR shows who is on the clock right now (Current Labor Hours, or # DE + # Inside) but not labor
+   hours worked so far. PWR Live counts them itself: every check it adds people-on-the-clock ×
+   time since the last check, per store, from the moment you open it. If PWR does show today's
+   labor hours worked, that column is used instead. */
+function rateOf(d) {
+  const r = colBy("labor_rate"); if (r && d[r.id] != null) return d[r.id];
+  const de = colBy("drivers_on"), ins = colBy("inside_on");
+  const a = de ? d[de.id] : null, b = ins ? d[ins.id] : null;
+  return a == null && b == null ? null : (a || 0) + (b || 0);
+}
+function trackLabor(data, t) {
+  const sa = colBy("sales");
+  for (const [st, d] of Object.entries(data)) {
+    const a = L.acc[st] || (L.acc[st] = { hours: 0, t, rate: null, sales0: null, t0: t });
+    // Phone asleep or tab closed: assume the crew stayed the same, up to 2 hours.
+    if (a.rate != null) a.hours += a.rate * Math.min(Math.max(0, t - a.t), 2 * 3600e3) / 3600e3;
+    a.t = t;
+    const r = rateOf(d); if (r != null) a.rate = r;
+    if (a.sales0 == null && sa && d[sa.id] != null) { a.sales0 = d[sa.id]; a.t0 = t; }
+  }
+  const last = L.accLog[L.accLog.length - 1];
+  if (!last || t - last.t >= 60e3) {
+    L.accLog.push({ t, h: Object.fromEntries(Object.entries(L.acc).map(([s, a]) => [s, a.hours])), s: sa ? Object.fromEntries(Object.entries(data).map(([s, d]) => [s, d[sa.id] ?? null])) : {} });
+    while (L.accLog.length && t - L.accLog[0].t > 5 * 3600e3) L.accLog.shift();
+    save();
+  }
+}
+const laborMode = () => colBy("labor_hours") ? "pwr" : colBy("labor_rate") || colBy("drivers_on") || colBy("inside_on") ? "tracked" : null;
+const crewNow = st => { const now = latest(); if (!now) return null; const ids = st == null ? Object.keys(now.data) : [st]; let n = 0, any = false; for (const s of ids) { const r = now.data[s] ? rateOf(now.data[s]) : null; if (r != null) { n += r; any = true; } } return any ? n : null; };
+const isStale = st => L.checkedAt - (L.lastChangeAt[st] || 0) >= STALE_MIN * 60e3;
+function logAt(mins) {
+  const target = L.checkedAt - mins * 60e3; let best = null;
+  for (const e of L.accLog) { if (e.t <= target) best = e; else break; }
+  if (best) return best;
+  const first = L.accLog[0];
+  return first && L.checkedAt - first.t >= 10 * 60e3 ? first : null;
+}
+// SPLH over the last 30 min: new sales ÷ labor hours used in that time.
 function splhRecent(st) {
-  const sa = colBy("sales"), hr = colBy("labor_hours"), now = latest(), old = snapAgo(PACE_MIN);
-  if (!sa || !hr || !now || !old) return null;
-  const pick = (s, id) => st == null ? sumCol(s, id) : s.data[st]?.[id];
-  const ds = pick(now, sa.id) - pick(old, sa.id), dh = pick(now, hr.id) - pick(old, hr.id);
-  if (!isFinite(ds) || !isFinite(dh) || dh < 0.25) return null;
-  return { mins: Math.round((now.t - old.t) / 60e3), ds, dh, splh: ds / dh };
+  const sa = colBy("sales"), now = latest(); if (!sa || !now) return null;
+  if (laborMode() === "pwr") {
+    const hr = colBy("labor_hours"), old = snapAgo(PACE_MIN); if (!old) return null;
+    const pick = (s, id) => st == null ? sumCol(s, id) : s.data[st]?.[id];
+    const ds = pick(now, sa.id) - pick(old, sa.id), dh = pick(now, hr.id) - pick(old, hr.id);
+    if (!isFinite(ds) || !isFinite(dh) || dh < 0.25) return null;
+    return { mins: Math.round((now.t - old.t) / 60e3), ds, dh, splh: ds / dh };
+  }
+  if (laborMode() !== "tracked") return null;
+  const e = logAt(PACE_MIN); if (!e) return null;
+  let ds = 0, dh = 0;
+  for (const s of st == null ? Object.keys(L.acc) : [st]) {
+    const s1 = now.data[s]?.[sa.id], s0 = e.s[s], h1 = L.acc[s]?.hours, h0 = e.h[s];
+    if ([s1, s0, h1, h0].some(v => v == null || !isFinite(v)) || isStale(s)) continue;
+    ds += s1 - s0; dh += h1 - h0;
+  }
+  if (dh < 0.1) return null;
+  return { mins: Math.round((L.checkedAt - e.t) / 60e3), ds, dh, splh: ds / dh };
+}
+// SPLH since you started watching (tracked), or for the whole day when PWR shows hours worked.
+function splhSince(st) {
+  const sa = colBy("sales"), now = latest(); if (!sa || !now) return null;
+  let ds = 0, dh = 0, t0 = Infinity;
+  for (const s of st == null ? Object.keys(L.acc) : [st]) {
+    const a = L.acc[s], s1 = now.data[s]?.[sa.id];
+    if (!a || a.sales0 == null || s1 == null) continue;
+    ds += s1 - a.sales0; dh += a.hours; t0 = Math.min(t0, a.t0);
+  }
+  return dh >= 0.1 ? { ds, dh, t0, splh: ds / dh } : null;
 }
 function splhNow(st) {
+  if (laborMode() === "tracked") return splhSince(st)?.splh ?? null;
   const now = latest(), sp = colBy("splh"); if (!now || !sp) return null;
   if (st != null) return now.data[st]?.[sp.id] ?? null;
   const sa = colBy("sales"), hr = colBy("labor_hours");
   if (sa && hr) { let s = 0, hh = 0; for (const d of Object.values(now.data)) if (d[sa.id] != null && d[hr.id] > 0) { s += d[sa.id]; hh += d[hr.id]; } return hh ? s / hh : null; }
   const v = Object.values(now.data).map(d => d[sp.id]).filter(x => x != null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+}
+// People the current sales pace supports at the SPLH goal.
+function crewSupported(st) {
+  const rec = splhRecent(st); if (!rec || !splhGoal || !rec.mins) return null;
+  return rec.ds / (rec.mins / 60) / splhGoal;
 }
 
 function alerts() {
@@ -478,16 +546,17 @@ function alerts() {
     const t = L.lastChangeAt[st] || L.snaps[0].t;
     if (now.t - t >= STALE_MIN * 60e3) out.push({ sev: "warn", text: `No new numbers from ${st} since ${clock(t)}. The store may not be reporting.` });
   }
-  if (splhGoal && colBy("splh")) {
+  if (splhGoal && laborMode()) {
     const low = [], high = [], dayLow = [];
     for (const st of stores) {
       const day = splhNow(st), rec = splhRecent(st);
-      if (rec && rec.splh < splhGoal * 0.8) low.push(`${st} ${money(rec.splh)}`);
+      const sup = crewSupported(st), crew = crewNow(st);
+      if (rec && rec.splh < splhGoal * 0.8) low.push(`${st} ${money(rec.splh)}` + (sup != null && crew != null ? ` (${crew.toFixed(1)} on, sales support ${sup.toFixed(1)})` : ""));
       else if (rec && rec.splh > splhGoal * 1.4) high.push(`${st} ${money(rec.splh)}`);
       if (day != null && day < splhGoal * 0.9) dayLow.push(`${st} ${money(day)}`);
     }
     const mins = (splhRecent(null) || {}).mins || PACE_MIN;
-    if (dayLow.length) out.push({ sev: "bad", text: `SPLH today under the ${money(splhGoal)} goal: ${dayLow.join(", ")}.` });
+    if (dayLow.length) out.push({ sev: "bad", text: `SPLH ${laborMode() === "tracked" ? "since you started watching" : "today"} under the ${money(splhGoal)} goal: ${dayLow.join(", ")}.` });
     if (low.length) out.push({ sev: "warn", text: `More labor on than sales need right now (SPLH last ${mins} min): ${low.join(", ")}.` });
     if (high.length) out.push({ sev: "warn", text: `Possibly short-handed (SPLH last ${mins} min well above goal; watch service): ${high.join(", ")}.` });
   }
@@ -631,23 +700,32 @@ function render() {
   body.append(kp);
 
   // Live SPLH tracker.
-  const spBox = h("div", null, h("h3", null, "SPLH (sales per labor hour)"));
-  if (colBy("splh")) {
-    const day = splhNow(null), rec = splhRecent(null);
+  const spBox = h("div", null, h("h3", null, "Live SPLH (sales per labor hour)"));
+  const mode = laborMode();
+  const goalVs = v => splhGoal && v != null ? h("span", { class: v >= splhGoal ? "up" : "down" }, `${v >= splhGoal ? "▲" : "▼"} ${money(Math.abs(v - splhGoal))} vs goal`) : "";
+  if (mode) {
+    const rec = splhRecent(null), since = mode === "tracked" ? splhSince(null) : null, day = mode === "pwr" ? splhNow(null) : null;
+    const crew = crewNow(null), sup = crewSupported(null);
     const grid = h("div", { class: "kpis" },
-      h("div", { class: "kpi" }, h("div", { class: "l" }, "Today so far"), h("div", { class: "v" }, day != null ? money(day) : "–"),
-        h("div", { class: "n" }, splhGoal && day != null ? h("span", { class: day >= splhGoal ? "up" : "down" }, `${day >= splhGoal ? "▲" : "▼"} ${money(Math.abs(day - splhGoal))} vs goal`) : (colBy("labor_hours") ? `${Math.round(sumCol(now, colBy("labor_hours").id) * 10) / 10} labor hours` : ""))),
-      h("div", { class: "kpi" }, h("div", { class: "l" }, `Last ${rec ? rec.mins : PACE_MIN} min`), h("div", { class: "v" }, rec ? money(rec.splh) : "…"),
-        h("div", { class: "n" }, rec ? `${money(rec.ds)} on ${Math.round(rec.dh * 10) / 10} hours` : (colBy("labor_hours") ? "Appears after 10 min of watching." : "PWR's own SPLH; open the Labor tab for a live 30-min view."))));
-    spBox.append(grid, h("div", { class: "row", style: "margin-top:6px" }, h("label", { class: "muted", for: "splhGoal" }, "Goal $"),
-      h("input", { id: "splhGoal", type: "number", inputmode: "decimal", step: "any", value: splhGoal ?? "", placeholder: "e.g. 85", style: "width:90px;border:1px solid var(--line);border-radius:8px;padding:5px 6px;background:var(--bg);color:var(--ink)",
-        onchange: e => { splhGoal = e.target.value === "" ? null : +e.target.value; try { e.target.value === "" ? localStorage.removeItem("pwrLive.splhGoal") : localStorage.setItem("pwrLive.splhGoal", String(splhGoal)); } catch (x) {} render(); } })));
-  } else spBox.append(h("div", { class: "muted" }, "Open Real Time Labor (it shows Current Labor Hours next to Today's Royalty Sales). If it still doesn't appear, pick the columns below."));
+      h("div", { class: "kpi" }, h("div", { class: "l" }, `Right now (last ${rec ? rec.mins : PACE_MIN} min)`), h("div", { class: "v" }, rec ? money(rec.splh) : "…"),
+        h("div", { class: "n" }, rec ? [goalVs(rec.splh), h("div", null, `${money(rec.ds)} on ${rec.dh.toFixed(1)} labor hrs`)] : "Appears after 10 min of watching.")),
+      mode === "tracked"
+        ? h("div", { class: "kpi" }, h("div", { class: "l" }, since ? `Since ${clock(since.t0)}` : "Since you started"), h("div", { class: "v" }, since ? money(since.splh) : "…"),
+            h("div", { class: "n" }, since ? [goalVs(since.splh), h("div", null, `${money(since.ds)} on ${since.dh.toFixed(1)} labor hrs`)] : "Counting labor hours…"))
+        : h("div", { class: "kpi" }, h("div", { class: "l" }, "Today so far"), h("div", { class: "v" }, day != null ? money(day) : "–"), h("div", { class: "n" }, goalVs(day))),
+      crew != null ? h("div", { class: "kpi" }, h("div", { class: "l" }, "On the clock now"), h("div", { class: "v" }, (Math.round(crew * 10) / 10).toString()),
+        h("div", { class: "n" }, sup != null ? h("span", { class: sup >= crew ? "up" : "down" }, `Sales pace supports ${sup.toFixed(1)} at ${money(splhGoal)}`) : (splhGoal ? "Staffing check appears after 10 min." : "Set a goal to see the staffing check."))) : null);
+    spBox.append(grid);
+    if (mode === "tracked") spBox.append(h("div", { class: "muted", style: "margin-top:6px" }, `PWR doesn't show hours worked, so PWR Live counts them from people on the clock every check since you opened it. Keep the panel open (minimized is fine) and it keeps counting while you move around PWR.`));
+  } else spBox.append(h("div", { class: "muted" }, "Open Real Time Labor so PWR Live can see who's on the clock (Current Labor Hours, # DE, # Inside). If it still doesn't appear, pick the columns below."));
+  spBox.append(h("div", { class: "row", style: "margin-top:6px" }, h("label", { class: "muted", for: "splhGoal" }, "SPLH goal $"),
+    h("input", { id: "splhGoal", type: "number", inputmode: "decimal", step: "any", value: splhGoal ?? "", placeholder: "e.g. 61", style: "width:90px;border:1px solid var(--line);border-radius:8px;padding:5px 6px;background:var(--bg);color:var(--ink)",
+      onchange: e => { splhGoal = e.target.value === "" ? null : +e.target.value; try { e.target.value === "" ? localStorage.removeItem("pwrLive.splhGoal") : localStorage.setItem("pwrLive.splhGoal", String(splhGoal)); } catch (x) {} render(); } })));
   const numericCols = L.cols.filter(c => !c.derived);
   const picker = (key, label) => h("div", { class: "row", style: "margin-top:6px" }, h("span", { class: "muted" }, label),
     h("select", { "aria-label": label, onchange: e => setManual(key, e.target.value) },
       h("option", { value: "" }, "— choose —"), numericCols.map(c => h("option", { value: c.id, selected: c.key === key ? "" : null }, c.label))));
-  if (numericCols.length) spBox.append(picker("sales", "Sales column"), picker("labor_hours", "Labor hours column"));
+  if (numericCols.length) spBox.append(picker("sales", "Sales column"), picker("labor_rate", "People on the clock column"), picker("labor_hours", "Hours worked today column (only if PWR shows one)"));
   body.append(spBox);
 
   // Alerts.
@@ -662,10 +740,11 @@ function render() {
   // Store board.
   const cols = [...L.cols];
   const paceCol = sa ? { id: "__pace", label: `Last ${PACE_MIN} min vs LY` } : null;
-  const splhCol = colBy("splh") && colBy("labor_hours") ? { id: "__splh", label: `SPLH last ${PACE_MIN} min` } : null;
-  const show = [...(paceCol ? [cols[0], paceCol, ...cols.slice(1)] : cols), splhCol].filter(Boolean);
+  const lm = laborMode();
+  const splhCols = lm ? [{ id: "__splh", label: `SPLH last ${PACE_MIN} min` }, lm === "tracked" ? { id: "__splhs", label: "SPLH since start" } : null, lm === "tracked" && splhGoal ? { id: "__crew", label: "Crew vs sales" } : null] : [];
+  const show = [...(paceCol ? [cols[0], paceCol, ...cols.slice(1)] : cols), ...splhCols].filter(Boolean);
   const stores = Object.keys(now.data);
-  const val = (st, c) => c.id === "__pace" ? (pace(st)?.pct ?? null) : c.id === "__splh" ? (splhRecent(st)?.splh ?? null) : now.data[st][c.id];
+  const val = (st, c) => c.id === "__pace" ? (pace(st)?.pct ?? null) : c.id === "__splh" ? (splhRecent(st)?.splh ?? null) : c.id === "__splhs" ? (splhSince(st)?.splh ?? null) : c.id === "__crew" ? (crewNow(st) != null && crewSupported(st) != null ? crewNow(st) - crewSupported(st) : null) : now.data[st][c.id];
   if (L.sort) stores.sort((a, b) => { const x = val(a, L.sort), y = val(b, L.sort); if (x == null) return 1; if (y == null) return -1; return (x - y) * L.sortDir; });
   else stores.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   const sortBy = id => { if (L.sort === id) L.sortDir *= -1; else { L.sort = id; L.sortDir = -1; } render(); };
@@ -677,6 +756,9 @@ function render() {
       h("td", null, h("span", { class: "dot", style: `background:${colorFor(st)}` }), st),
       show.map(c => {
         if (c.id === "__pace") { if (now.t - (L.lastChangeAt[st] || now.t) >= STALE_MIN * 60e3) return h("td", { class: "warn" }, "no data"); const p = pace(st); return h("td", { class: p && p.pct != null ? (p.pct <= -15 ? "bad" : p.pct >= 0 ? "good" : "") : "" }, p ? (p.pct != null ? `${p.pct >= 0 ? "+" : ""}${p.pct.toFixed(0)}%` : money(p.ds)) : "…"); }
+        const goalCls = v => v == null || !splhGoal ? "" : v >= splhGoal ? "good" : v < splhGoal * 0.8 ? "bad" : "warn";
+        if (c.id === "__splhs") { const s = splhSince(st); return h("td", { class: goalCls(s && s.splh) }, s ? money(s.splh) : "…"); }
+        if (c.id === "__crew") { const n = crewNow(st), sp = crewSupported(st); if (n == null || sp == null) return h("td", null, "…"); const d = n - sp; return h("td", { class: Math.abs(d) < 0.5 ? "good" : d > 0 ? "bad" : "warn", title: `${n.toFixed(1)} on the clock; current sales support ${sp.toFixed(1)} at the goal` }, Math.abs(d) < 0.5 ? "on target" : d > 0 ? `${d.toFixed(1)} over` : `${(-d).toFixed(1)} short`); }
         if (c.id === "__splh") { const s = splhRecent(st); return h("td", { class: s && splhGoal ? (s.splh >= splhGoal ? "good" : s.splh < splhGoal * 0.8 ? "bad" : "warn") : "" }, s ? money(s.splh) : "…"); }
         const v = now.data[st][c.id];
         const stt = c.key === "pcya" ? (v == null ? null : v >= 0 ? "good" : "bad") : c.key === "splh" ? (v == null || !splhGoal ? null : v >= splhGoal ? "good" : v >= splhGoal * 0.9 ? "warn" : "bad") : c.key ? status(c.key, v) : null;
@@ -695,7 +777,7 @@ function render() {
   // Tools.
   const tools = h("div", { class: "row" },
     h("button", { class: "btn", type: "button", onclick: copyTable }, "Copy table for the analyzer"),
-    h("button", { class: "btn", type: "button", onclick: () => { L.snaps = []; L.cols = []; L.colSeen = {}; L.lastChangeAt = {}; save(); tick(); } }, "Restart history"));
+    h("button", { class: "btn", type: "button", onclick: () => { L.snaps = []; L.cols = []; L.colSeen = {}; L.lastChangeAt = {}; L.acc = {}; L.accLog = []; save(); tick(); } }, "Restart history"));
   body.append(tools);
   if (L.copied) body.append(h("div", { class: "muted" }, L.copied));
   body.append(h("div", { class: "muted" }, "Columns read: " + (L.cols.filter(c => !c.derived).map(c => c.label + (c.key ? ` (${M[c.key] ? M[c.key].label : c.key})` : "")).join(", ") || "none yet")));
