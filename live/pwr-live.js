@@ -5,6 +5,41 @@
 
 if (window.__pwrLive) { window.__pwrLive.show(); return; }
 
+/* ---------- Stay-open mode ----------
+   A bookmark only lives on the page it was opened on, so signing in or moving between PWR
+   screens would close the panel. Instead, the tab shows PWR in a full-screen frame under the
+   panel: you sign in and browse PWR inside it and the panel stays put. PWR keeps full control
+   of its own pages; if one chooses to leave the frame, it loads normally and tapping PWR Live
+   again brings the panel back with its history. */
+let frame = null;
+const startUrl = location.href;
+// If PWR left the frame last time (the panel vanished without being closed), use single-page
+// mode for the rest of this tab so the bookmark keeps working.
+let leftFrame = false;
+try { leftFrame = !!sessionStorage.getItem("pwrLive.framed"); if (leftFrame) sessionStorage.removeItem("pwrLive.framed"); } catch (e) {}
+try { if (leftFrame) sessionStorage.setItem("pwrLive.noFrame", "1"); leftFrame = leftFrame || !!sessionStorage.getItem("pwrLive.noFrame"); } catch (e) {}
+if (window.top === window && !leftFrame) {
+  try { sessionStorage.setItem("pwrLive.framed", "1"); } catch (e) {}
+  // The old page is being replaced; stop its leftover timers (such as its own auto-refresh)
+  // so they don't reload the tab out from under the frame.
+  try { let id = setTimeout(() => {}, 0); while (id > 0) { clearTimeout(id); clearInterval(id); id--; } } catch (e) {}
+  const title = document.title, de = document.documentElement;
+  de.replaceChildren();
+  de.removeAttribute("class");
+  const head = document.createElement("head"), body = document.createElement("body");
+  const vp = document.createElement("meta"); vp.name = "viewport"; vp.content = "width=device-width, initial-scale=1";
+  const tt = document.createElement("title"); tt.textContent = title;
+  head.append(vp, tt);
+  de.style.cssText = "height:100%;margin:0;";
+  body.style.cssText = "height:100%;margin:0;overflow:hidden;";
+  frame = document.createElement("iframe");
+  frame.style.cssText = "border:0;width:100%;height:100%;display:block;";
+  frame.title = title;
+  frame.src = startUrl;
+  body.append(frame);
+  de.append(head, body);
+}
+
 const norm = s => String(s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
 const TGT = Object.assign(Object.fromEntries(METRICS.filter(m => m.target != null).map(m => [m.key, m.target])), T || {});
 const PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"];
@@ -79,8 +114,13 @@ function fromAria(root) {
 }
 
 function docs() {
-  const out = [document];
-  for (const f of document.querySelectorAll("iframe,frame")) { try { if (f.contentDocument) out.push(f.contentDocument); } catch (e) { /* other site */ } }
+  const out = [];
+  const walk = (d, depth) => {
+    out.push(d);
+    if (depth > 3) return;
+    for (const f of d.querySelectorAll("iframe,frame")) { try { if (f.contentDocument && f.contentDocument.documentElement) walk(f.contentDocument, depth + 1); } catch (e) { /* other site */ } }
+  };
+  walk(document, 0);
   return out;
 }
 
@@ -153,8 +193,16 @@ function tick() {
   try { found = scan(); } catch (e) { L.err = "Couldn't read the page: " + e.message; render(); return; }
   L.found = found;
   L.checkedAt = Date.now();
-  if (!found.length) { L.err = "No report table found on this page. Open Real Time Sales (or another PWR report with a table) and tap PWR Live again."; render(); return; }
+  if (!found.length) {
+    const signIn = docs().some(d => [...d.querySelectorAll('input[type="password"]')].some(visible));
+    if (signIn) {
+      L.err = "Sign in to PWR. The panel stays open and starts reading once you're on Real Time Sales.";
+      if (!L.mini) { L.autoMini = true; api.minimize(); }
+    } else L.err = frame ? "No report table on this screen yet. Open Real Time Sales (or another PWR report with a table)." : "No report table found on this page. Open Real Time Sales (or another PWR report with a table) and tap PWR Live again.";
+    render(); return;
+  }
   L.err = "";
+  if (L.autoMini) { L.autoMini = false; api.show(); return; }
   const best = found.map((f, i) => ({ i, s: f.parsed.cols.filter(c => c.key).length * 10 + Object.keys(f.parsed.data).length })).sort((a, b) => b.s - a.s);
   const pick = found[L.pick] ? L.pick : best[0].i;
   L.pick = pick;
@@ -335,8 +383,8 @@ function render() {
   panel.append(h("div", { class: "head" },
     h("div", { class: "grow" }, h("div", { class: "title" }, "PWR Live"),
       h("div", { class: "sub" }, L.checkedAt ? `Checked ${new Date(L.checkedAt).toLocaleTimeString()} · watching since ${L.snaps[0] ? clock(L.snaps[0].t) : "now"}` : "Reading the page…")),
-    h("button", { class: "ib", type: "button", title: "Minimize", "aria-label": "Minimize", onclick: () => { L.mini = true; panel.style.display = "none"; mini.style.display = ""; mini.removeAttribute("hidden"); render(); } }, "–"),
-    h("button", { class: "ib", type: "button", title: "Close", "aria-label": "Close", onclick: () => api.close() }, "×")));
+    h("button", { class: "ib", type: "button", title: "Minimize", "aria-label": "Minimize", onclick: () => api.minimize() }, "–"),
+    h("button", { class: "ib", type: "button", title: frame ? "Leave PWR Live" : "Close", "aria-label": frame ? "Leave PWR Live" : "Close", onclick: () => api.close() }, "×")));
   const body = h("div", { class: "body" });
   panel.append(body);
 
@@ -481,8 +529,27 @@ let timer = null, observer = null, debounce = null;
 function restart() { clearInterval(timer); timer = setInterval(tick, L.interval * 1000); }
 const api = {
   show() { L.mini = false; panel.style.display = ""; mini.style.display = "none"; tick(); },
-  close() { clearInterval(timer); if (observer) observer.disconnect(); host.remove(); delete window.__pwrLive; },
+  minimize() { L.mini = true; panel.style.display = "none"; mini.style.display = ""; mini.removeAttribute("hidden"); render(); },
+  close() {
+    if (frame) { try { sessionStorage.removeItem("pwrLive.framed"); } catch (e) {} let u = startUrl; try { u = frame.contentWindow.location.href; } catch (e) {} location.href = u; return; }
+    clearInterval(timer); if (observer) observer.disconnect(); host.remove(); delete window.__pwrLive;
+  },
 };
+// Each time PWR loads a new screen in the frame: show its address in the address bar and watch it.
+let frameObserver = null;
+function onFrameLoad() {
+  let d = null;
+  try { d = frame.contentDocument; } catch (e) {}
+  if (!d || !d.documentElement) { L.err = "This screen can't be shown inside PWR Live (it's on another site, often a sign-in page). Tap × to leave, sign in, then tap PWR Live again."; render(); return; }
+  try { const u = frame.contentWindow.location.href; if (u && u !== "about:blank") history.replaceState(null, "", u); if (d.title) document.title = d.title; } catch (e) {}
+  try {
+    if (frameObserver) frameObserver.disconnect();
+    frameObserver = new MutationObserver(() => { clearTimeout(debounce); debounce = setTimeout(tick, 1200); });
+    frameObserver.observe(d.body || d.documentElement, { childList: true, subtree: true, characterData: true });
+  } catch (e) {}
+  tick();
+}
+if (frame) frame.addEventListener("load", onFrameLoad);
 mini.addEventListener("click", () => api.show());
 window.__pwrLive = api;
 try {

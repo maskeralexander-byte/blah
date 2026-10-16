@@ -39,6 +39,8 @@ What it shows, refreshed every 5 to 60 seconds:
 - A **store table** you can sort by tapping a column, and a **chart** of any column since you started watching.
 - **Copy table for the analyzer** copies the current table so you can paste it into the full analyzer.
 
+**It stays open while you use PWR.** Tap it on any PWR page, even the sign-in page. The tab then shows PWR in a full-screen frame under the panel, so signing in, switching reports and page reloads don't close it. PWR keeps full control of its own pages: if one ever leaves the frame, it loads normally and the next tap opens the panel on that page instead.
+
 It's read-only: it reads the text of the table on screen and never clicks, types, submits, or sends anything. The history it builds while you watch stays in that browser tab (session storage), so it survives a page refresh but nothing is sent anywhere. Tap the bookmark again after a full page reload.
 
 **Set it up** from the PWR Live section in the analyzer (index.html): copy the bookmark code and save it as a bookmark named "PWR Live". On Android Chrome, open it by typing "PWR Live" in the address bar while on the PWR page and tapping the bookmark.
