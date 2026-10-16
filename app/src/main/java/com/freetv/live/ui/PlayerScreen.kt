@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.CastConnected
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -95,6 +96,9 @@ fun PlayerScreen(vm: TvViewModel, onExit: () -> Unit) {
     val castMessage by vm.castMessage.collectAsState()
     val receiverMissing by vm.receiverMissing.collectAsState()
     var showCast by remember { mutableStateOf(false) }
+    var showList by remember { mutableStateOf(false) }
+    val guide by vm.guide.collectAsState()
+    val now by rememberNow()
     val i = index ?: return
     val channel = queue.getOrNull(i) ?: return
 
@@ -226,9 +230,11 @@ fun PlayerScreen(vm: TvViewModel, onExit: () -> Unit) {
     }
 
     BackHandler { vm.stop(); onExit() }
+    // Registered later, so BACK closes the channel list before it leaves the player.
+    BackHandler(enabled = showList) { showList = false }
 
     val focus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { focus.requestFocus() }
+    LaunchedEffect(showList) { if (!showList) runCatching { focus.requestFocus() } }
 
     Box(
         Modifier
@@ -237,11 +243,13 @@ fun PlayerScreen(vm: TvViewModel, onExit: () -> Unit) {
             .focusRequester(focus)
             .focusable()
             .onPreviewKeyEvent { ev ->
-                if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                // While the channel list is open, the D-pad moves through the list instead.
+                if (ev.type != KeyEventType.KeyDown || showList) return@onPreviewKeyEvent false
                 when (val code = ev.key.nativeKeyCode) {
                     AndroidKeyEvent.KEYCODE_DPAD_UP, AndroidKeyEvent.KEYCODE_CHANNEL_UP -> { vm.playAt(i + 1); true }
                     AndroidKeyEvent.KEYCODE_DPAD_DOWN, AndroidKeyEvent.KEYCODE_CHANNEL_DOWN -> { vm.playAt(i - 1); true }
                     AndroidKeyEvent.KEYCODE_DPAD_CENTER, AndroidKeyEvent.KEYCODE_ENTER,
+                    AndroidKeyEvent.KEYCODE_GUIDE -> { showList = true; true }
                     AndroidKeyEvent.KEYCODE_INFO, AndroidKeyEvent.KEYCODE_DPAD_LEFT,
                     AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> { overlayVisible = true; overlayTick++; true }
                     AndroidKeyEvent.KEYCODE_MENU, AndroidKeyEvent.KEYCODE_BOOKMARK,
@@ -340,15 +348,24 @@ fun PlayerScreen(vm: TvViewModel, onExit: () -> Unit) {
                     modifier = Modifier.align(Alignment.TopStart).padding(16.dp).background(Color(0x88000000), RoundedCornerShape(50)),
                 ) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White) }
 
-                IconButton(
-                    onClick = { showCast = true },
-                    modifier = Modifier.align(Alignment.TopEnd).padding(16.dp).background(Color(0x88000000), RoundedCornerShape(50)),
+                Row(
+                    Modifier.align(Alignment.TopEnd).padding(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    Icon(
-                        if (castTarget != null) Icons.Default.CastConnected else Icons.Default.Cast,
-                        "Cast to Roku",
-                        tint = if (castTarget != null) Accent else Color.White,
-                    )
+                    IconButton(
+                        onClick = { showList = true },
+                        modifier = Modifier.background(Color(0x88000000), RoundedCornerShape(50)),
+                    ) { Icon(Icons.AutoMirrored.Filled.List, "Channel list", tint = Color.White) }
+                    IconButton(
+                        onClick = { showCast = true },
+                        modifier = Modifier.background(Color(0x88000000), RoundedCornerShape(50)),
+                    ) {
+                        Icon(
+                            if (castTarget != null) Icons.Default.CastConnected else Icons.Default.Cast,
+                            "Cast to Roku",
+                            tint = if (castTarget != null) Accent else Color.White,
+                        )
+                    }
                 }
 
                 Column(
@@ -363,7 +380,10 @@ fun PlayerScreen(vm: TvViewModel, onExit: () -> Unit) {
                     }
                 }
 
+                val (nowShow, next) = guide.nowAndNext(channel, now)
                 InfoBar(
+                    nowShow = nowShow,
+                    next = next,
                     channel = channel,
                     number = i + 1,
                     total = queue.size,
@@ -373,11 +393,18 @@ fun PlayerScreen(vm: TvViewModel, onExit: () -> Unit) {
                 )
             }
         }
+
+        if (showList) {
+            ChannelListOverlay(vm, onClose = { showList = false }, modifier = Modifier.align(Alignment.CenterStart))
+        }
     }
 }
 
 @Composable
-private fun InfoBar(channel: Channel, number: Int, total: Int, favorite: Boolean, onFavorite: () -> Unit, modifier: Modifier) {
+private fun InfoBar(
+    nowShow: com.freetv.live.data.Programme?,
+    next: com.freetv.live.data.Programme?,
+    channel: Channel, number: Int, total: Int, favorite: Boolean, onFavorite: () -> Unit, modifier: Modifier) {
     // Phones in portrait get a compact bar; the remote-key hint only shows on wide (TV) screens.
     val compact = LocalConfiguration.current.screenWidthDp < 600
     Row(
@@ -399,8 +426,9 @@ private fun InfoBar(channel: Channel, number: Int, total: Int, favorite: Boolean
             val sub = listOfNotNull(channel.group, channel.country?.let(TvViewModel::countryName), "$number of $total")
             Text(sub.joinToString(" · "), color = Color(0xFFBBBBCC), maxLines = 1, overflow = TextOverflow.Ellipsis,
                 style = if (compact) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium)
+            NowNextLines(nowShow, next, compact)
             if (!compact) {
-                Text("▲▼ change channel · 0–9 jump to number · MENU favorite",
+                Text("▲▼ change channel · OK channel list · 0–9 jump to number · MENU favorite",
                     color = Color(0xFF888899), style = MaterialTheme.typography.bodySmall)
             }
         }

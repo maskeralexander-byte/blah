@@ -11,4 +11,6 @@ data class Channel(
     val referrer: String?,
     val source: String,
     val english: Boolean = false,
+    /** From an official free service or broadcaster (see [isOfficialStream]). */
+    val official: Boolean = false,
 )

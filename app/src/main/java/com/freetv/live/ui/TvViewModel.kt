@@ -5,6 +5,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.freetv.live.data.Channel
 import com.freetv.live.data.ChannelRepository
+import com.freetv.live.data.Guide
+import com.freetv.live.data.GuideRepository
 import com.freetv.live.data.PlaylistSource
 import com.freetv.live.data.RokuCaster
 import com.freetv.live.data.RokuDevice
@@ -35,6 +37,19 @@ data class Facet(val section: Section, val label: String, val count: Int)
 class TvViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = ChannelRepository(app)
     private val caster = RokuCaster(app)
+    private val guideRepo = GuideRepository(app)
+
+    private val _guide = MutableStateFlow(Guide.Empty)
+    val guide: StateFlow<Guide> = _guide.asStateFlow()
+
+    /** Show only channels from official free services and broadcasters. */
+    private val _officialOnly = MutableStateFlow(repo.officialOnly)
+    val officialOnly: StateFlow<Boolean> = _officialOnly.asStateFlow()
+
+    fun setOfficialOnly(on: Boolean) {
+        repo.officialOnly = on
+        _officialOnly.value = on
+    }
     private val castPrefs = app.getSharedPreferences("cast", android.content.Context.MODE_PRIVATE)
 
     private val _channels = MutableStateFlow<List<Channel>>(emptyList())
@@ -62,8 +77,8 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
     val tab: StateFlow<LanguageTab> = _tab.asStateFlow()
 
     /** Channels in the selected language tab. */
-    val tabChannels: StateFlow<List<Channel>> = combine(_channels, _tab) { all, tab ->
-        all.filter { it.english == (tab == LanguageTab.English) }
+    val tabChannels: StateFlow<List<Channel>> = combine(_channels, _tab, _officialOnly) { all, tab, officialOnly ->
+        all.filter { it.english == (tab == LanguageTab.English) && (!officialOnly || it.official) }
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     private val _section = MutableStateFlow<Section>(Section.All)
@@ -136,6 +151,7 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
             _channels.value = result.channels
             _errors.value = result.errors
             _loading.value = false
+            _guide.value = guideRepo.load(force)
         }
     }
 

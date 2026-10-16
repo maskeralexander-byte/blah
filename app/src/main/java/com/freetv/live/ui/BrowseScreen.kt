@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -167,6 +168,8 @@ private fun ChannelPane(vm: TvViewModel, onMenu: (() -> Unit)?, onOpenSources: (
     val query by vm.query.collectAsState()
     val favorites by vm.favorites.collectAsState()
     val all by vm.channels.collectAsState()
+    val guide by vm.guide.collectAsState()
+    val now by rememberNow()
 
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -206,6 +209,19 @@ private fun ChannelPane(vm: TvViewModel, onMenu: (() -> Unit)?, onOpenSources: (
                 Tab(selected = tab == t, onClick = { vm.selectTab(t) }, text = { Text(t.label) })
             }
         }
+        val officialOnly by vm.officialOnly.collectAsState()
+        Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = officialOnly,
+                onClick = { vm.setOfficialOnly(true) },
+                label = { Text("Official channels") },
+            )
+            FilterChip(
+                selected = !officialOnly,
+                onClick = { vm.setOfficialOnly(false) },
+                label = { Text("All streams") },
+            )
+        }
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (errors.isNotEmpty()) {
             Text(
@@ -235,6 +251,7 @@ private fun ChannelPane(vm: TvViewModel, onMenu: (() -> Unit)?, onOpenSources: (
                     ChannelRow(
                         number = i + 1,
                         channel = c,
+                        nowTitle = guide.nowAndNext(c, now).first?.title,
                         favorite = c.url in favorites,
                         onPlay = { vm.play(list, i) },
                         onFavorite = { vm.toggleFavorite(c) },
@@ -246,7 +263,7 @@ private fun ChannelPane(vm: TvViewModel, onMenu: (() -> Unit)?, onOpenSources: (
 }
 
 @Composable
-private fun ChannelRow(number: Int, channel: Channel, favorite: Boolean, onPlay: () -> Unit, onFavorite: () -> Unit) {
+private fun ChannelRow(number: Int, channel: Channel, nowTitle: String?, favorite: Boolean, onPlay: () -> Unit, onFavorite: () -> Unit) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -271,7 +288,8 @@ private fun ChannelRow(number: Int, channel: Channel, favorite: Boolean, onPlay:
                 Column(Modifier.weight(1f)) {
                     Text(channel.name, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.titleMedium)
-                    val sub = listOfNotNull(channel.group, channel.country?.let(TvViewModel::countryName)).joinToString(" · ")
+                    val sub = nowTitle?.let { "Now: $it" }
+                        ?: listOfNotNull(channel.group, channel.country?.let(TvViewModel::countryName)).joinToString(" · ")
                     Text(sub, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }

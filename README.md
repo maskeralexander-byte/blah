@@ -31,16 +31,32 @@ Because these are public lists, some streams go offline at any time. To keep thi
 Note: the public lists also contain some unofficial rebroadcasts of paid channels. These tend to be the
 least reliable streams, and the app makes no attempt to keep them working.
 
+## Official channels vs. all streams
+
+The chips under the tabs switch between **Official channels** (the default) and **All streams**.
+Official means the stream comes from a free streaming service (Pluto TV, Samsung TV Plus, Plex,
+Tubi, Xumo and their delivery partners), a broadcaster, or a major CDN that broadcasters use. That's
+about 1,700 English channels, and they're the most reliable. **All streams** also shows everything
+else in the public lists, including unofficial rebroadcasts on unknown servers. Playlists you add
+yourself always count as official.
+
+## Program guide
+
+Channels from Pluto TV, Samsung TV Plus and Plex show what's on now (in the list) and now/next (in
+the player), using the free XMLTV guides published by [i.mjh.nz](https://github.com/matthuisman/i.mjh.nz).
+Guides refresh every 6 hours. Pluto channels match by channel ID; Samsung and Plex match by name.
+
 ## Using it
 
 **On a TV remote**
 - Browse: D-pad to move, OK to play, → to the ★ to favorite.
-- Watching: ▲/▼ or CH+/CH− change channel, number keys jump to a channel number,
-  OK shows channel info, MENU toggles favorite, BACK returns to the list.
+- Watching: ▲/▼ or CH+/CH− change channel, OK (or GUIDE) opens the channel list with what's on,
+  ◀/▶ shows channel info, number keys jump to a channel, MENU toggles favorite, BACK closes the
+  list or returns to browsing.
 
 **On a phone**
 - Tap ☰ for categories and countries, search at the top.
-- While watching, tap the screen to show the controls (back, channel arrows, ★).
+- While watching, tap the screen to show the controls (back, channel list, cast, channel arrows, ★).
 
 ## Casting to a Roku
 

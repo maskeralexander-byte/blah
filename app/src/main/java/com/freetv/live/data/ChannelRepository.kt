@@ -90,6 +90,10 @@ class ChannelRepository(context: Context) {
         prefs.edit().putString(KEY_FAILED, JSONObject(map as Map<*, *>).toString()).apply()
     }
 
+    var officialOnly: Boolean
+        get() = prefs.getBoolean(KEY_OFFICIAL_ONLY, true)
+        set(value) = prefs.edit().putBoolean(KEY_OFFICIAL_ONLY, value).apply()
+
     var hideFailed: Boolean
         get() = prefs.getBoolean(KEY_HIDE_FAILED, true)
         set(value) = prefs.edit().putBoolean(KEY_HIDE_FAILED, value).apply()
@@ -116,7 +120,7 @@ class ChannelRepository(context: Context) {
                 (c.tvgId?.let(::baseId) in englishIds) ||
                 // Playlists the user added themselves always show in the main view.
                 c.source in customNames
-            if (isEnglish) c.copy(english = true) else c
+            c.copy(english = isEnglish, official = c.source in customNames || isOfficialStream(c.url))
         }
         LoadResult(channels, results.mapNotNull { it.second })
     }
@@ -177,6 +181,7 @@ class ChannelRepository(context: Context) {
         const val KEY_RECENTS = "recents"
         const val KEY_FAILED = "failed"
         const val KEY_HIDE_FAILED = "hide_failed"
+        const val KEY_OFFICIAL_ONLY = "official_only"
         const val FAIL_TTL_MS = 24L * 60 * 60 * 1000
         const val CACHE_MS = 12L * 60 * 60 * 1000
     }
