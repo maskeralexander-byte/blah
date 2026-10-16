@@ -9,6 +9,15 @@
 
     <children>
         <Poster id="background" width="1920" height="1080" uri="pkg:/images/bg.png" />
+
+        <!-- Guide backdrop, drawn under the video so the video shows live in the preview box. -->
+        <Group id="guideBg" visible="false">
+            <Poster width="1920" height="1080" uri="pkg:/images/bg.png" />
+            <Poster width="1920" height="440" uri="pkg:/images/header.png" />
+            <Poster translation="[88, 52]" width="496" height="286" uri="pkg:/images/timecard.png" />
+            <Poster id="previewLogoBig" translation="[136, 95]" width="400" height="200" loadDisplayMode="scaleToFit" />
+        </Group>
+
         <Video id="video" width="1920" height="1080" enableUI="false" />
 
         <!-- Idle / loading / error screen. -->
@@ -44,24 +53,31 @@
 
         <Timecard id="timecard" />
 
+        <!-- Short confirmations ("Added to Favorites") and typed channel numbers. -->
+        <Group id="toast" visible="false" translation="[760, 60]">
+            <Poster width="400" height="88" uri="pkg:/images/timecard.png" />
+            <Label id="toastText" width="400" height="88" horizAlign="center" vertAlign="center" color="0xFFFFFFFF">
+                <Font role="font" uri="pkg:/fonts/Poppins-SemiBold.ttf" size="28" />
+            </Label>
+        </Group>
+        <Label id="digits" translation="[1580, 60]" width="260" horizAlign="right" visible="false" color="0x3FE0D0FF">
+            <Font role="font" uri="pkg:/fonts/Bungee-Regular.ttf" size="96" />
+        </Label>
+
         <!-- Cable-style guide: preview header, category menu with search, and a time grid. -->
         <Group id="guide" visible="false">
-            <Poster width="1920" height="1080" uri="pkg:/images/bg.png" />
-            <Poster width="1920" height="440" uri="pkg:/images/header.png" />
-
-            <!-- Preview of the focused programme. -->
-            <Poster translation="[96, 60]" width="480" height="270" uri="pkg:/images/timecard.png" />
-            <Poster id="previewLogo" translation="[136, 95]" width="400" height="200" loadDisplayMode="scaleToFit" />
-            <Label id="previewKicker" translation="[640, 58]" width="900" color="0x3FE0D0FF" text="ON NOW">
+            <!-- Preview of the focused programme (the live picture sits in the box on the left). -->
+            <Poster id="previewLogo" translation="[640, 62]" width="150" height="84" loadDisplayMode="scaleToFit" />
+            <Label id="previewKicker" translation="[812, 58]" width="700" color="0x3FE0D0FF" text="ON NOW">
                 <Font role="font" uri="pkg:/fonts/Poppins-SemiBold.ttf" size="22" />
             </Label>
-            <Label id="previewTitle" translation="[640, 88]" width="1000" color="0xFFFFFFFF">
+            <Label id="previewTitle" translation="[812, 86]" width="840" color="0xFFFFFFFF">
                 <Font role="font" uri="pkg:/fonts/Poppins-SemiBold.ttf" size="52" />
             </Label>
-            <Label id="previewChannel" translation="[640, 160]" width="1000" color="0xDDDAFFFF">
+            <Label id="previewChannel" translation="[640, 162]" width="1000" color="0xDDDAFFFF">
                 <Font role="font" uri="pkg:/fonts/Poppins-Regular.ttf" size="30" />
             </Label>
-            <Label id="previewTime" translation="[640, 204]" width="1000" color="0xFF8FC0FF">
+            <Label id="previewTime" translation="[640, 206]" width="1000" color="0xFF8FC0FF">
                 <Font role="font" uri="pkg:/fonts/Poppins-SemiBold.ttf" size="26" />
             </Label>
             <Label id="previewDesc" translation="[640, 248]" width="1180" height="120" wrap="true" maxLines="3" color="0xE6E4FFFF">
@@ -71,7 +87,7 @@
                 <Font role="font" uri="pkg:/fonts/Bungee-Regular.ttf" size="44" />
             </Label>
             <Label id="hint" translation="[1300, 112]" width="524" horizAlign="right" color="0x9F9BD0FF"
-                text="OK WATCH   ·   ◀ MENU &amp; SEARCH   ·   BACK CLOSE">
+                text="OK WATCH   ·   ✱ FAVORITE   ·   ◀ MENU   ·   BACK CLOSE">
                 <Font role="font" uri="pkg:/fonts/Poppins-SemiBold.ttf" size="18" />
             </Label>
 
@@ -117,7 +133,9 @@
         </Group>
 
         <Timer id="bannerTimer" duration="6" />
-        <Timer id="refreshTimer" duration="300" repeat="true" />
+        <Timer id="refreshTimer" duration="1800" repeat="true" />
+        <Timer id="toastTimer" duration="2.5" />
+        <Timer id="digitsTimer" duration="1.6" />
         <Timer id="clockTimer" duration="20" repeat="true" />
         <Timer id="searchTimer" duration="0.6" />
         <Timer id="programTimer" duration="20" repeat="true" />

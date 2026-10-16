@@ -13,6 +13,12 @@ sub build()
     ' Which channels, in which order.
     order = []
     mode = f.mode
+    favs = {}
+    if f.favs <> invalid
+        for each url in f.favs
+            favs[url] = true
+        end for
+    end if
     if mode = "recent"
         indexByUrl = {}
         for i = 0 to channels.Count() - 1
@@ -30,7 +36,7 @@ sub build()
             ch = channels[i]
             keep = true
             if mode = "fav"
-                keep = (ch.fav = true)
+                keep = favs.DoesExist(ch.url)
             else if mode = "group"
                 keep = (ch.g = f.value)
             else if mode = "search"
@@ -45,7 +51,7 @@ sub build()
         ch = channels[i]
         row = root.CreateChild("ContentNode")
         row.title = textOf(ch.name)
-        row.AddFields({ number: (i + 1).ToStr() })
+        row.AddFields({ number: (i + 1).ToStr(), fav: favs.DoesExist(ch.url) })
         if ch.logo <> invalid then row.HDSMALLICONURL = ch.logo
 
         added = 0

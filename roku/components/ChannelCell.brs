@@ -2,6 +2,7 @@ sub init()
     m.number = m.top.FindNode("number")
     m.logo = m.top.FindNode("logo")
     m.name = m.top.FindNode("name")
+    m.star = m.top.FindNode("star")
 end sub
 
 sub layout()
@@ -12,6 +13,8 @@ sub layout()
 
     m.number.height = h
     if c.hasField("number") then m.number.text = c.number else m.number.text = ""
+    m.star.visible = c.hasField("fav") and c.fav = true
+    m.star.translation = [16, h - 26]
 
     left = 80
     boxW = w - left - 12

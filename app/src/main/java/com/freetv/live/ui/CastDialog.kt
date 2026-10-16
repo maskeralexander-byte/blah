@@ -121,9 +121,9 @@ fun ReceiverSetup(vm: TvViewModel, modifier: Modifier = Modifier) {
     Surface(modifier, shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (update) {
-                Text("Update the Roku receiver", style = MaterialTheme.typography.titleMedium)
+                Text("Update the Live TV app on your Roku", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "The new version adds the TV guide and channel changing with the Roku remote. " +
+                    "A new version of the TV app is ready. " +
                         "Enter your Developer Mode password and tap Install. The app remembers it, so " +
                         "future updates install on their own.",
                     style = MaterialTheme.typography.bodySmall,
@@ -131,7 +131,7 @@ fun ReceiverSetup(vm: TvViewModel, modifier: Modifier = Modifier) {
             } else {
                 Text("One-time Roku setup", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "Your Roku needs the small Live TV receiver app. You only do this once.",
+                    "Install the Live TV app on your Roku. You only do this once.",
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Text("1. On the Roku remote, press: Home ×3, Up ×2, Right, Left, Right, Left, Right.", style = MaterialTheme.typography.bodyMedium)

@@ -7,7 +7,6 @@ import com.freetv.live.data.Channel
 import com.freetv.live.data.ChannelRepository
 import com.freetv.live.data.Guide
 import com.freetv.live.data.GuideRepository
-import com.freetv.live.data.LineupServer
 import com.freetv.live.data.PlaylistSource
 import com.freetv.live.data.RokuCaster
 import com.freetv.live.data.RokuDevice
@@ -42,15 +41,6 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = ChannelRepository(app)
     private val caster = RokuCaster(app)
     private val guideRepo = GuideRepository(app)
-    private val lineupServer = LineupServer {
-        // Record which lineup the TV actually fetched; see checkReceiverFetched().
-        fetchedLineupVersion = lineupVersion()
-        lastLineupFetchAt = System.currentTimeMillis()
-        lineupJson()
-    }
-
-    @Volatile private var fetchedLineupVersion: String? = null
-    @Volatile private var lastLineupFetchAt = 0L
 
     private val _guide = MutableStateFlow(Guide.Empty)
     val guide: StateFlow<Guide> = _guide.asStateFlow()
@@ -259,7 +249,7 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
         if (!isOlder(installed, BuildConfig.ROKU_RECEIVER_VERSION)) return true
         val password = castPrefs.getString("dev_password_${device.host}", null)
         if (password != null) {
-            _castMessage.value = "Updating the receiver on ${device.name}…"
+            _castMessage.value = "Updating Live TV on ${device.name}…"
             if (runCatching { caster.installReceiver(device, password) }.isSuccess) {
                 kotlinx.coroutines.delay(1_500)
                 return true
@@ -267,28 +257,36 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
         }
         _receiverMissing.value = true
         _receiverUpdate.value = true
-        _castMessage.value = "There's an update for the receiver on ${device.name} that adds the TV guide and remote control."
+        _castMessage.value = "There's an update for the Live TV app on ${device.name}."
         return false
     }
 
-    /**
-     * The current receiver downloads the lineup right after it gets a new one. If that doesn't
-     * happen, the Roku is running an old receiver (or can't reach this phone), so say so.
-     */
-    private fun checkReceiverFetched(device: RokuDevice, sentVersion: String) {
-        // The TV only re-downloads when the lineup changed since its last download.
-        if (fetchedLineupVersion == sentVersion) return
-        val sentAt = System.currentTimeMillis()
+    // ---- Phone as a remote for the TV app ----
+
+    /** Presses a Roku remote key (ECP names: Up, Select, Back, Home, Info, Play, VolumeUp…). */
+    fun sendKey(key: String) {
+        val device = _castTarget.value ?: return
         viewModelScope.launch {
-            kotlinx.coroutines.delay(12_000)
-            if (_castTarget.value?.host != device.host || lastLineupFetchAt >= sentAt) return@launch
-            if (lineupVersion() != sentVersion) return@launch // A newer send is already being checked.
-            _receiverMissing.value = true
-            _receiverUpdate.value = true
-            _castMessage.value = "The TV guide and Roku remote need the updated receiver on ${device.name}. " +
-                "If you've already updated, check that your phone and Roku are on the same Wi-Fi."
+            runCatching { caster.keypress(device, key) }
+                .onFailure { _castMessage.value = "Couldn't reach ${device.name}: ${it.message}" }
         }
     }
+
+    /** Sends a command to the Live TV app on the TV, opening it first if needed. */
+    fun sendCommand(vararg params: Pair<String, String>) {
+        val device = _castTarget.value ?: return
+        viewModelScope.launch {
+            if (!ensureReceiverCurrent(device)) return@launch
+            runCatching { caster.command(device, params.toMap()) }
+                .onFailure { e ->
+                    if (e is RokuCaster.ReceiverMissingException) _receiverMissing.value = true
+                    _castMessage.value = e.message
+                }
+        }
+    }
+
+    /** Opens the Live TV app on the TV, picking up where it left off. */
+    fun openOnTv() = sendCommand()
 
     /** Shows the receiver install/update card on request. */
     fun requestReceiverUpdate() {
@@ -306,51 +304,11 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
         return false
     }
 
-    /** Changes whenever the lineup or guide changes, so the TV knows to reload it. */
-    private fun lineupVersion(): String =
-        "${_queue.value.size}-${_queue.value.hashCode()}-${System.identityHashCode(_guide.value)}-${_favorites.value.hashCode()}"
-
-    /** Channels in the current list with the next few hours of listings, for the Roku. */
-    private fun lineupJson(): String {
-        val now = System.currentTimeMillis()
-        val guide = _guide.value
-        val favs = _favorites.value
-        val channels = JSONArray()
-        _queue.value.forEach { c ->
-            val o = JSONObject()
-                .put("name", c.name)
-                .put("url", c.url)
-                .put("format", caster.formatOf(c.url))
-            c.userAgent?.let { o.put("ua", it) }
-            c.referrer?.let { o.put("ref", it) }
-            c.logo?.let { o.put("logo", it) }
-            o.put("g", c.group)
-            if (c.url in favs) o.put("fav", true)
-            val shows = guide.programmesFor(c, now).filter { it.start < now + 6 * 3_600_000L }.take(8)
-            if (shows.isNotEmpty()) {
-                o.put("p", JSONArray().apply {
-                    shows.forEachIndexed { n, show ->
-                        val item = JSONObject().put("t", show.title).put("s", show.start / 1000).put("e", show.stop / 1000)
-                        // Descriptions only for the first few shows, to keep the TV's download small.
-                        if (n < 3) show.description?.let { item.put("d", it.take(180)) }
-                        put(item)
-                    }
-                })
-            }
-            channels.put(o)
-        }
-        return JSONObject().put("channels", channels).toString()
-    }
-
-    override fun onCleared() {
-        lineupServer.stop()
-    }
-
     fun installReceiver(password: String) {
         val device = _castTarget.value ?: return
         viewModelScope.launch {
             _installing.value = true
-            _castMessage.value = "Installing the receiver on ${device.name}…"
+            _castMessage.value = "Installing Live TV on ${device.name}…"
             try {
                 caster.installReceiver(device, password)
                 // Kept on this phone only, so later receiver updates install without asking.
@@ -414,21 +372,14 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun sendToRoku() {
         val device = _castTarget.value ?: return
-        val index = _playing.value ?: return
-        val channel = _queue.value.getOrNull(index) ?: return
+        val channel = _playing.value?.let { _queue.value.getOrNull(it) } ?: return
         viewModelScope.launch {
             _receiverMissing.value = false
             _receiverUpdate.value = false
             _castMessage.value = "Sending ${channel.name} to ${device.name}…"
             if (!ensureReceiverCurrent(device)) return@launch
-            // Hand the TV the whole lineup so its remote can change channels and open the guide.
-            val sentVersion = lineupVersion()
-            val extra = lineupServer.start(viewModelScope)?.let { url ->
-                mapOf("lineup" to url, "index" to "$index", "v" to sentVersion)
-            }.orEmpty()
             _castMessage.value = try {
-                caster.play(device, channel, extra)
-                if (extra.isNotEmpty()) checkReceiverFetched(device, sentVersion)
+                caster.play(device, channel)
                 if (channel.userAgent != null || channel.referrer != null) {
                     "Playing on ${device.name}. This channel needs special headers, so it may not load on Roku."
                 } else {

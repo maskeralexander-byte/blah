@@ -89,7 +89,7 @@ private const val DEFAULT_UA =
 
 @OptIn(UnstableApi::class)
 @Composable
-fun PlayerScreen(vm: TvViewModel, onExit: () -> Unit) {
+fun PlayerScreen(vm: TvViewModel, onExit: () -> Unit, onOpenRemote: () -> Unit) {
     val queue by vm.queue.collectAsState()
     val index by vm.playing.collectAsState()
     val favorites by vm.favorites.collectAsState()
@@ -294,6 +294,7 @@ fun PlayerScreen(vm: TvViewModel, onExit: () -> Unit) {
                 }
                 Spacer(Modifier.padding(6.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Button(onClick = onOpenRemote) { Text("Remote") }
                     OutlinedButton(onClick = vm::retryCast) { Text("Try again", color = Color.White) }
                     OutlinedButton(onClick = vm::stopCasting) { Text("Stop casting", color = Color.White) }
                 }

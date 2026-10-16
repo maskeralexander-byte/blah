@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SettingsRemote
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Tv
@@ -76,12 +77,12 @@ import com.freetv.live.data.Channel
 import kotlinx.coroutines.launch
 
 @Composable
-fun BrowseScreen(vm: TvViewModel, onOpenSources: () -> Unit) {
+fun BrowseScreen(vm: TvViewModel, onOpenSources: () -> Unit, onOpenRemote: () -> Unit) {
     BoxWithConstraints(Modifier.fillMaxSize().nightBackground()) {
         if (maxWidth >= 720.dp) {
             Row(Modifier.fillMaxSize()) {
                 SectionPane(vm, Modifier.width(280.dp).fillMaxHeight(), onPicked = {})
-                ChannelPane(vm, onMenu = null, onOpenSources = onOpenSources)
+                ChannelPane(vm, onMenu = null, onOpenSources = onOpenSources, onOpenRemote = onOpenRemote)
             }
         } else {
             val drawer = rememberDrawerState(DrawerValue.Closed)
@@ -94,7 +95,7 @@ fun BrowseScreen(vm: TvViewModel, onOpenSources: () -> Unit) {
                     }
                 },
             ) {
-                ChannelPane(vm, onMenu = { scope.launch { drawer.open() } }, onOpenSources = onOpenSources)
+                ChannelPane(vm, onMenu = { scope.launch { drawer.open() } }, onOpenSources = onOpenSources, onOpenRemote = onOpenRemote)
             }
         }
     }
@@ -163,7 +164,7 @@ private fun SectionItem(label: String, count: Int?, selected: Boolean, onClick: 
 }
 
 @Composable
-private fun ChannelPane(vm: TvViewModel, onMenu: (() -> Unit)?, onOpenSources: () -> Unit) {
+private fun ChannelPane(vm: TvViewModel, onMenu: (() -> Unit)?, onOpenSources: () -> Unit, onOpenRemote: () -> Unit) {
     val list by vm.visible.collectAsState()
     val loading by vm.loading.collectAsState()
     val errors by vm.errors.collectAsState()
@@ -178,6 +179,9 @@ private fun ChannelPane(vm: TvViewModel, onMenu: (() -> Unit)?, onOpenSources: (
         var showCast by remember { mutableStateOf(false) }
         if (showCast) CastDialog(vm, onDismiss = { showCast = false })
         val actions: @Composable () -> Unit = {
+            if (castTarget != null) {
+                IconButton(onClick = onOpenRemote) { Icon(Icons.Default.SettingsRemote, "Remote", tint = Cyan) }
+            }
             IconButton(onClick = { showCast = true }) {
                 Icon(
                     if (castTarget != null) Icons.Default.CastConnected else Icons.Default.Cast,

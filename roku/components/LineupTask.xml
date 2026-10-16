@@ -1,10 +1,15 @@
 <?xml version="1.0" encoding="utf-8" ?>
-<!-- Fetches the channel lineup (channels + guide) from the phone app, falling back to the saved copy. -->
+<!--
+  Builds the TV's own channel lineup: downloads the English playlist and the free guide feeds,
+  parses them, and caches the result. mode = "cache" returns the saved copy right away;
+  mode = "refresh" downloads what's stale (playlist daily, guide every 3 hours).
+-->
 <component name="LineupTask" extends="Task">
     <interface>
-        <field id="uri" type="string" />
+        <field id="mode" type="string" value="refresh" />
+        <field id="force" type="boolean" />
         <field id="lineup" type="assocarray" />
-        <field id="fromCache" type="boolean" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/LineupTask.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Lineup.brs" />
 </component>

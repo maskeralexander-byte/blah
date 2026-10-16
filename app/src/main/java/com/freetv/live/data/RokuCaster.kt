@@ -104,7 +104,7 @@ class RokuCaster(private val context: Context) {
 
     /** Thrown when the Roku has neither the receiver channel nor the built-in player. */
     class ReceiverMissingException : IllegalStateException(
-        "This Roku needs the Live TV receiver installed first (a one-time setup)."
+        "This Roku needs the Live TV app installed first (a one-time setup)."
     )
 
     private fun activeAppId(device: RokuDevice): String? = try {
@@ -203,6 +203,26 @@ class RokuCaster(private val context: Context) {
 
     private fun md5(s: String): String =
         java.security.MessageDigest.getInstance("MD5").digest(s.toByteArray()).joinToString("") { "%02x".format(it) }
+
+    /** Presses a key on the Roku remote, e.g. "Up", "Select", "Back", "Home", "Info", "VolumeUp". */
+    suspend fun keypress(device: RokuDevice, key: String) = withContext(Dispatchers.IO) {
+        post(device, "/keypress/$key")
+        Unit
+    }
+
+    /**
+     * Sends a command to the Live TV app ("channel_up", "number", "search", "guide"…).
+     * If the app isn't open, launches it with the command; with no params it just opens it.
+     */
+    suspend fun command(device: RokuDevice, params: Map<String, String>) = withContext(Dispatchers.IO) {
+        val query = params.entries.joinToString("&") { (k, v) -> "$k=${URLEncoder.encode(v, "UTF-8")}" }
+        if (activeAppId(device) == "dev") {
+            if (query.isNotEmpty()) post(device, "/input?$query")
+            return@withContext
+        }
+        val path = if (query.isEmpty()) "/launch/dev" else "/launch/dev?$query"
+        if (!post(device, path, allowNotFound = true)) throw ReceiverMissingException()
+    }
 
     /** Returns the Roku to its home screen, which stops playback. */
     suspend fun stop(device: RokuDevice) = withContext(Dispatchers.IO) { post(device, "/keypress/Home"); Unit }

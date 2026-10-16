@@ -1,29 +1,13 @@
 sub init()
-    m.top.functionName = "load"
+    m.top.functionName = "work"
 end sub
 
-sub load()
-    cachePath = "cachefs:/lineup.json"
-    text = invalid
-    if m.top.uri <> invalid and m.top.uri <> ""
-        xfer = CreateObject("roUrlTransfer")
-        xfer.SetUrl(m.top.uri)
-        xfer.SetMinimumTransferRate(1, 8)
-        text = xfer.GetToString()
-        if text = "" then text = invalid
+sub work()
+    if m.top.mode = "cache"
+        lineup = readLineupCache()
+        if lineup = invalid then lineup = { channels: [], builtAt: 0 }
+        m.top.lineup = lineup
+        return
     end if
-
-    fromCache = false
-    if text = invalid
-        text = ReadAsciiFile(cachePath)
-        fromCache = true
-    else
-        WriteAsciiFile(cachePath, text)
-    end if
-
-    lineup = invalid
-    if text <> invalid and text <> "" then lineup = ParseJson(text)
-    if lineup = invalid then lineup = { channels: [] }
-    m.top.fromCache = fromCache
-    m.top.lineup = lineup
+    m.top.lineup = buildLineup(m.top.force)
 end sub

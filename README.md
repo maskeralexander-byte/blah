@@ -58,44 +58,40 @@ Guides refresh every 6 hours. Pluto channels match by channel ID; Samsung and Pl
 - Tap ☰ for categories and countries, search at the top.
 - While watching, tap the screen to show the controls (back, channel list, cast, channel arrows, ★).
 
-## Casting to a Roku
+## On the TV (Roku)
 
-Tap the cast icon (top bar, or top-right while watching) to pick a Roku on the same Wi-Fi. Your
-phone becomes the remote: changing channels in the app changes them on the TV.
+The Roku app (`roku/`) is a standalone live TV app. It downloads the English channel list and the
+free guide feeds (Pluto TV and Samsung TV Plus, about 370 channels with listings) by itself, keeps
+a copy, and refreshes it in the background, so it works from the Roku home screen with just the Roku
+remote:
 
-Current Rokus can't play a stream URL sent from a phone on their own, so the TV runs a small
-receiver channel (`roku/`) that the app starts and controls over Roku's External Control Protocol.
-It's installed once:
+- **Up/Down** change channel, **Left/Right** show the channel banner, **✱** adds or removes a
+  favorite, **Back** exits.
+- **OK** opens a cable-style guide: the live picture keeps playing in the box at the top left, with a
+  time grid of channels and shows, and a menu (**Left**) with All Channels, Favorites, Recents, the
+  biggest categories, **Search**, and an Official / All streams switch.
+- A "now playing" card slides in on every channel change and when a new show starts.
+
+### Installing it (once)
 
 1. On the Roku remote press **Home ×3, Up ×2, Right, Left, Right, Left, Right**, choose
    **Enable installer and restart**, and set a password.
-2. Cast any channel from the app. It sees the receiver is missing and asks for that password,
-   then installs the receiver itself.
+2. In the phone app tap the cast icon, pick the Roku, and enter that password when asked. The app
+   installs Live TV on the Roku and keeps it updated after that.
 
 (Manual alternative: open `http://<roku-ip>` in a browser, sign in as `rokudev`, and upload
 `roku-receiver.zip`, which the build outputs to `app/build/generated/roku-assets/`.)
 
-**On the TV:** while casting, the Roku gets the whole channel list and guide from the phone, so
-the Roku remote works on its own. **Up/Down** change channel, **OK** opens the guide, **Left/Right**
-show the channel banner, **Back** closes the guide or exits.
+### The phone as a remote
 
-A "now playing" card slides in at the top right on every channel change and whenever a new show
-starts (on the phone and on the TV), with the show, its times and a progress bar.
-
-The guide is laid out like a cable guide: a preview of the focused show (logo, title, times,
-description, clock) on top, a time grid of channels and shows below, and a menu on the left
-(**Left** from the grid) with All Channels, Favorites, Recents, the biggest categories and **Search**,
-which filters channels and shows as you type on the on-screen keyboard. The Roku keeps a copy of the lineup, so it keeps working if the phone app closes, and you can
-open Live TV straight from the Roku home screen to pick up where you left off. (Guide times
-refresh from the phone every 5 minutes while it's reachable.)
-
-When a newer receiver ships with the app, it updates the Roku automatically using the Developer Mode
-password saved on the phone at first install.
+Once connected, the **remote** icon in the phone app opens a remote for the TV: D-pad and OK, Back,
+Home, Guide, Favorite, CH ▲/▼, volume and mute, play/pause, a number pad that tunes the TV's channel
+numbers, and **Search on TV**, which types your search into the TV's guide. Tapping a channel in the
+phone app plays it on the TV. Everything goes over Roku's External Control Protocol on your Wi-Fi.
 
 - If no Roku shows up, enter its IP address (on the Roku: Settings → Network → About).
 - If the Roku refuses requests, set Settings → System → Advanced system settings → Control by
   mobile apps → Network access to **Default** or **Permissive**.
-- Older Rokus that still have the built-in "Play on Roku" player work without the receiver.
 
 ## Look
 
