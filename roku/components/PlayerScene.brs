@@ -137,7 +137,9 @@ sub onLineup(event as Object)
         if m.resume and m.registry.Read("index") <> ""
             playIndex(m.index)
         else
+            ' First launch: open the guide with channel 1 playing in the preview box.
             openGuide()
+            playIndex(m.index)
         end if
     end if
 end sub
@@ -709,9 +711,11 @@ function nowNext(ch as Object) as Object
     return result
 end function
 
-function fmtTime(secs as Integer) as String
+' Takes any number type: guide times arrive as Integer, LongInteger or Double depending on the source.
+function fmtTime(secs as Dynamic) as String
+    if secs = invalid then return ""
     dt = CreateObject("roDateTime")
-    dt.FromSeconds(secs)
+    dt.FromSeconds(Int(secs))
     dt.ToLocalTime()
     h = dt.GetHours()
     mins = dt.GetMinutes()
