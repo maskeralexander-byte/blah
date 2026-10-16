@@ -6,6 +6,9 @@ data class PlaylistSource(val id: String, val name: String, val url: String, val
  * Community-maintained lists of publicly available, free-to-air streams
  * (broadcasters' own streams and free ad-supported services like Pluto TV).
  */
+/** iptv-org's list of English-language channels, used only to tag channels by language. */
+const val ENGLISH_INDEX_URL = "https://iptv-org.github.io/iptv/languages/eng.m3u"
+
 val BuiltInSources = listOf(
     PlaylistSource(
         id = "iptv-org",

@@ -15,6 +15,9 @@ streams**: broadcasters' own free streams and free ad-supported services such as
 | [Free-TV/IPTV](https://github.com/Free-TV/IPTV) | ~2,000 |
 
 Duplicates are removed. Lists refresh every 12 hours and are cached for offline start-up.
+The app opens on **English** channels (about 3,300, tagged using iptv-org's language list); everything
+else is under the **Other languages** tab. Playlists you add yourself always appear under English.
+
 You can turn sources on or off, or add any M3U/M3U8 playlist link you're entitled to use
 (for example your TV provider's IPTV link) under **Settings → Channel sources**.
 

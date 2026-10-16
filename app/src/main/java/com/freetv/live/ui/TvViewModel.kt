@@ -26,6 +26,8 @@ sealed interface Section {
     data class Country(val code: String) : Section
 }
 
+enum class LanguageTab(val label: String) { English("English"), Other("Other languages") }
+
 data class Facet(val section: Section, val label: String, val count: Int)
 
 class TvViewModel(app: Application) : AndroidViewModel(app) {
@@ -52,6 +54,14 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
     private val _hideFailed = MutableStateFlow(repo.hideFailed)
     val hideFailed: StateFlow<Boolean> = _hideFailed.asStateFlow()
 
+    private val _tab = MutableStateFlow(LanguageTab.English)
+    val tab: StateFlow<LanguageTab> = _tab.asStateFlow()
+
+    /** Channels in the selected language tab. */
+    val tabChannels: StateFlow<List<Channel>> = combine(_channels, _tab) { all, tab ->
+        all.filter { it.english == (tab == LanguageTab.English) }
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
     private val _section = MutableStateFlow<Section>(Section.All)
     val section: StateFlow<Section> = _section.asStateFlow()
 
@@ -70,13 +80,13 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
     private val _playing = MutableStateFlow<Int?>(null)
     val playing: StateFlow<Int?> = _playing.asStateFlow()
 
-    val groups: StateFlow<List<Facet>> = _channels.map { list ->
+    val groups: StateFlow<List<Facet>> = tabChannels.map { list ->
         list.groupingBy { it.group }.eachCount()
             .map { (g, n) -> Facet(Section.Group(g), g, n) }
             .sortedWith(compareBy<Facet> { it.label == "Other" }.thenBy { it.label.lowercase() })
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    val countries: StateFlow<List<Facet>> = _channels.map { list ->
+    val countries: StateFlow<List<Facet>> = tabChannels.map { list ->
         list.mapNotNull { it.country }.groupingBy { it }.eachCount()
             .map { (c, n) -> Facet(Section.Country(c), countryName(c), n) }
             .sortedBy { it.label }
@@ -89,17 +99,18 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
     private data class Filters(val section: Section, val query: String, val hidden: Set<String>)
 
     val visible: StateFlow<List<Channel>> = combine(
-        _channels, _filters, _favorites, _recents,
-    ) { all, (section, query, hidden), favs, recents ->
+        _channels, tabChannels, _filters, _favorites, _recents,
+    ) { all, inTab, (section, query, hidden), favs, recents ->
+        // Favorites and recents span both language tabs; everything else is per tab.
         val base = when (section) {
-            Section.All -> all
+            Section.All -> inTab
             Section.Favorites -> all.filter { it.url in favs }
             Section.Recent -> {
                 val byUrl = all.associateBy { it.url }
                 recents.mapNotNull { byUrl[it] }
             }
-            is Section.Group -> all.filter { it.group == section.name }
-            is Section.Country -> all.filter { it.country == section.code }
+            is Section.Group -> inTab.filter { it.group == section.name }
+            is Section.Country -> inTab.filter { it.country == section.code }
         }
         // Favorites always stay visible, even when they failed recently.
         val healthy = if (section == Section.Favorites || hidden.isEmpty()) base else base.filter { it.url !in hidden }
@@ -125,6 +136,12 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun selectSection(s: Section) { _section.value = s }
+
+    fun selectTab(t: LanguageTab) {
+        _tab.value = t
+        // Category/country picks belong to one tab, so reset them when switching.
+        if (_section.value is Section.Group || _section.value is Section.Country) _section.value = Section.All
+    }
     fun setQuery(q: String) { _query.value = q }
 
     fun toggleFavorite(c: Channel) {

@@ -41,6 +41,8 @@ import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
@@ -91,7 +93,7 @@ fun BrowseScreen(vm: TvViewModel, onOpenSources: () -> Unit) {
 @Composable
 private fun SectionPane(vm: TvViewModel, modifier: Modifier, onPicked: () -> Unit) {
     val current by vm.section.collectAsState()
-    val channels by vm.channels.collectAsState()
+    val channels by vm.tabChannels.collectAsState()
     val favorites by vm.favorites.collectAsState()
     val groups by vm.groups.collectAsState()
     val countries by vm.countries.collectAsState()
@@ -184,6 +186,12 @@ private fun ChannelPane(vm: TvViewModel, onMenu: (() -> Unit)?, onOpenSources: (
             )
             IconButton(onClick = { vm.refresh(force = true) }) { Icon(Icons.Default.Refresh, "Refresh") }
             IconButton(onClick = onOpenSources) { Icon(Icons.Default.Settings, "Sources") }
+        }
+        val tab by vm.tab.collectAsState()
+        TabRow(selectedTabIndex = tab.ordinal, containerColor = MaterialTheme.colorScheme.background) {
+            LanguageTab.entries.forEach { t ->
+                Tab(selected = tab == t, onClick = { vm.selectTab(t) }, text = { Text(t.label) })
+            }
         }
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (errors.isNotEmpty()) {

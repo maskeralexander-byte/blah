@@ -100,13 +100,29 @@ class ChannelRepository(context: Context) {
     suspend fun load(forceRefresh: Boolean): LoadResult = withContext(Dispatchers.IO) {
         val disabled = disabledSources()
         val sources = allSources().filterNot { it.id in disabled }
-        val results = coroutineScope {
-            sources.map { src -> async { loadSource(src, forceRefresh) } }.awaitAll()
+        val englishIndex = PlaylistSource("lang-eng", "English index", ENGLISH_INDEX_URL, builtIn = true)
+        val (results, english) = coroutineScope {
+            val lists = sources.map { src -> async { loadSource(src, forceRefresh) } }
+            val eng = async { loadSource(englishIndex, forceRefresh).first }
+            lists.awaitAll() to eng.await()
         }
+        val englishUrls = english.mapTo(HashSet()) { it.url }
+        val englishIds = english.mapNotNullTo(HashSet()) { it.tvgId?.let(::baseId) }
+        val customNames = customSources().mapTo(HashSet()) { it.name }
+
         val seen = HashSet<String>()
-        val channels = results.flatMap { it.first }.filter { seen.add(it.url) }
+        val channels = results.flatMap { it.first }.filter { seen.add(it.url) }.map { c ->
+            val isEnglish = c.url in englishUrls ||
+                (c.tvgId?.let(::baseId) in englishIds) ||
+                // Playlists the user added themselves always show in the main view.
+                c.source in customNames
+            if (isEnglish) c.copy(english = true) else c
+        }
         LoadResult(channels, results.mapNotNull { it.second })
     }
+
+    /** "CNN.us@HD" -> "cnn.us", so feeds of the same channel match. */
+    private fun baseId(id: String) = id.substringBefore('@').lowercase()
 
     private fun loadSource(src: PlaylistSource, forceRefresh: Boolean): Pair<List<Channel>, String?> {
         val cache = File(cacheDir, "${src.id}.m3u")

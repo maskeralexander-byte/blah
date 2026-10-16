@@ -10,4 +10,5 @@ data class Channel(
     val userAgent: String?,
     val referrer: String?,
     val source: String,
+    val english: Boolean = false,
 )
