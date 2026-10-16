@@ -75,6 +75,16 @@ It's installed once:
 (Manual alternative: open `http://<roku-ip>` in a browser, sign in as `rokudev`, and upload
 `roku-receiver.zip`, which the build outputs to `app/build/generated/roku-assets/`.)
 
+**On the TV:** while casting, the Roku gets the whole channel list and guide from the phone, so
+the Roku remote works on its own. **Up/Down** change channel, **OK** opens the on-screen guide (what's
+on now and next, with progress), **Left/Right** show the channel banner, **Back** closes the guide or
+exits. The Roku keeps a copy of the lineup, so it keeps working if the phone app closes, and you can
+open Free Live TV straight from the Roku home screen to pick up where you left off. (Guide times
+refresh from the phone every 5 minutes while it's reachable.)
+
+When a newer receiver ships with the app, it updates the Roku automatically using the Developer Mode
+password saved on the phone at first install.
+
 - If no Roku shows up, enter its IP address (on the Roku: Settings → Network → About).
 - If the Roku refuses requests, set Settings → System → Advanced system settings → Control by
   mobile apps → Network access to **Default** or **Permissive**.

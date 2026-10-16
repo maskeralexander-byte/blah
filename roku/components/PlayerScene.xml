@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <component name="PlayerScene" extends="Scene">
     <interface>
-        <!-- Set from main.brs with the ECP parameters: contentId (stream URL), title, format, ua, ref. -->
+        <!-- ECP parameters from main.brs: contentId, title, format, ua, ref, lineup, index, v; or resume. -->
         <field id="request" type="assocarray" onChange="onRequest" />
     </interface>
 
@@ -10,8 +10,35 @@
     <children>
         <Rectangle id="background" width="1920" height="1080" color="0x0E0E14FF" />
         <Video id="video" width="1920" height="1080" enableUI="false" />
-        <Label id="title" translation="[96, 820]" width="1728" font="font:LargeBoldSystemFont" color="0xFFFFFFFF" />
-        <Label id="status" translation="[96, 900]" width="1728" wrap="true" font="font:MediumSystemFont" color="0xBBBBCCFF"
-            text="Waiting for the Free Live TV app on your phone. Pick a channel and tap the cast icon." />
+
+        <!-- Shown while loading or when a channel fails. -->
+        <Label id="title" translation="[96, 440]" width="1728" horizAlign="center" font="font:LargeBoldSystemFont" color="0xFFFFFFFF" />
+        <Label id="status" translation="[96, 520]" width="1728" horizAlign="center" wrap="true" font="font:MediumSystemFont" color="0xBBBBCCFF"
+            text="Open Free Live TV on your phone, pick a channel and tap the cast icon." />
+
+        <!-- Channel banner: appears on channel change and on Left/Right. -->
+        <Group id="banner" visible="false">
+            <Rectangle translation="[0, 780]" width="1920" height="300" color="0x000000CC" />
+            <Label id="bannerNumber" translation="[96, 830]" width="180" font="font:LargeBoldSystemFont" color="0x8B73FFFF" />
+            <Label id="bannerName" translation="[280, 820]" width="1540" font="font:LargeBoldSystemFont" color="0xFFFFFFFF" />
+            <Label id="bannerNow" translation="[280, 890]" width="1540" font="font:MediumSystemFont" color="0xFFFFFFFF" />
+            <Label id="bannerNext" translation="[280, 945]" width="1540" font="font:SmallSystemFont" color="0xBBBBCCFF" />
+            <Label translation="[280, 1000]" width="1540" font="font:SmallestSystemFont" color="0x888899FF"
+                text="Up/Down change channel  ·  OK guide  ·  Back exit" />
+        </Group>
+
+        <!-- On-screen guide. -->
+        <Group id="guide" visible="false">
+            <Rectangle width="840" height="1080" color="0x0E0E14F2" />
+            <Label translation="[64, 48]" width="720" font="font:LargeBoldSystemFont" color="0xFFFFFFFF" text="Guide" />
+            <Label id="guideHint" translation="[64, 112]" width="720" font="font:SmallestSystemFont" color="0x888899FF"
+                text="OK to watch  ·  Back to close" />
+            <MarkupList id="guideList" translation="[40, 160]" itemComponentName="GuideItem"
+                itemSize="[760, 112]" itemSpacing="[0, 6]" numRows="8" vertFocusAnimationStyle="floatingFocus"
+                drawFocusFeedback="false" />
+        </Group>
+
+        <Timer id="bannerTimer" duration="6" />
+        <Timer id="refreshTimer" duration="300" repeat="true" />
     </children>
 </component>

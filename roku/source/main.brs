@@ -1,6 +1,7 @@
-' Free Live TV receiver for Roku.
-' The Android app starts this channel over ECP (/launch/dev?contentId=<stream url>&...)
-' and sends later channel changes to it while it runs (/input?contentId=...).
+' Free Live TV for Roku.
+' The Android app launches this channel over ECP (/launch/dev?contentId=<stream>&lineup=<url>&index=<n>)
+' and sends channel changes while it runs (/input?...). It can also be opened from the Roku home
+' screen, in which case it reloads the last channel lineup it saw.
 sub Main(args as Dynamic)
     screen = CreateObject("roSGScreen")
     port = CreateObject("roMessagePort")
@@ -11,7 +12,11 @@ sub Main(args as Dynamic)
     input = CreateObject("roInput")
     input.SetMessagePort(port)
 
-    if args <> invalid and args.contentId <> invalid then scene.request = args
+    if args <> invalid and (args.contentId <> invalid or args.lineup <> invalid)
+        scene.request = args
+    else
+        scene.request = { resume: "true" }
+    end if
 
     while true
         msg = Wait(0, port)
@@ -21,7 +26,7 @@ sub Main(args as Dynamic)
         else if msgType = "roInputEvent"
             if msg.IsInput()
                 info = msg.GetInfo()
-                if info <> invalid and info.contentId <> invalid then scene.request = info
+                if info <> invalid then scene.request = info
             end if
         end if
     end while

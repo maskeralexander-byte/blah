@@ -21,6 +21,13 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
+
+        // Version of the bundled Roku receiver, so the app can tell when a Roku needs an update.
+        val rokuManifest = rootProject.file("roku/manifest").readLines()
+            .filter { "=" in it }.associate { it.substringBefore("=") to it.substringAfter("=") }
+        val rokuVersion = listOf("major_version", "minor_version", "build_version")
+            .joinToString(".") { rokuManifest[it] ?: "0" }
+        buildConfigField("String", "ROKU_RECEIVER_VERSION", "\"$rokuVersion\"")
     }
 
     buildTypes {
@@ -40,6 +47,7 @@ android {
     sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/roku-assets"))
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -61,6 +69,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
 }
 
 tasks.named("preBuild") { dependsOn(rokuReceiverZip) }

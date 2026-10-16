@@ -7,9 +7,13 @@ import com.freetv.live.data.Channel
 import com.freetv.live.data.ChannelRepository
 import com.freetv.live.data.Guide
 import com.freetv.live.data.GuideRepository
+import com.freetv.live.data.LineupServer
 import com.freetv.live.data.PlaylistSource
 import com.freetv.live.data.RokuCaster
 import com.freetv.live.data.RokuDevice
+import com.freetv.live.BuildConfig
+import org.json.JSONArray
+import org.json.JSONObject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -38,6 +42,7 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = ChannelRepository(app)
     private val caster = RokuCaster(app)
     private val guideRepo = GuideRepository(app)
+    private val lineupServer = LineupServer { lineupJson() }
 
     private val _guide = MutableStateFlow(Guide.Empty)
     val guide: StateFlow<Guide> = _guide.asStateFlow()
@@ -233,6 +238,72 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
     private val _installing = MutableStateFlow(false)
     val installing: StateFlow<Boolean> = _installing.asStateFlow()
 
+    /** Set when the Roku has an older receiver and no saved password to update it with. */
+    private val _receiverUpdate = MutableStateFlow(false)
+    val receiverUpdate: StateFlow<Boolean> = _receiverUpdate.asStateFlow()
+
+    /**
+     * Makes sure the Roku's receiver is the version bundled with this app, updating it with the
+     * saved Developer Mode password when possible. Returns false when the user has to step in.
+     */
+    private suspend fun ensureReceiverCurrent(device: RokuDevice): Boolean {
+        val installed = caster.receiverVersion(device) ?: return true // Not installed: play() reports it.
+        if (!isOlder(installed, BuildConfig.ROKU_RECEIVER_VERSION)) return true
+        val password = castPrefs.getString("dev_password_${device.host}", null)
+        if (password != null) {
+            _castMessage.value = "Updating the receiver on ${device.name}…"
+            if (runCatching { caster.installReceiver(device, password) }.isSuccess) {
+                kotlinx.coroutines.delay(1_500)
+                return true
+            }
+        }
+        _receiverMissing.value = true
+        _receiverUpdate.value = true
+        _castMessage.value = "There's an update for the receiver on ${device.name} that adds the TV guide and remote control."
+        return false
+    }
+
+    private fun isOlder(a: String, b: String): Boolean {
+        val x = a.split('.').map { it.toIntOrNull() ?: 0 }
+        val y = b.split('.').map { it.toIntOrNull() ?: 0 }
+        for (i in 0 until maxOf(x.size, y.size)) {
+            val d = x.getOrElse(i) { 0 } - y.getOrElse(i) { 0 }
+            if (d != 0) return d < 0
+        }
+        return false
+    }
+
+    /** Changes whenever the lineup or guide changes, so the TV knows to reload it. */
+    private fun lineupVersion(): String =
+        "${_queue.value.size}-${_queue.value.hashCode()}-${System.identityHashCode(_guide.value)}"
+
+    /** Channels in the current list with the next few hours of listings, for the Roku. */
+    private fun lineupJson(): String {
+        val now = System.currentTimeMillis()
+        val guide = _guide.value
+        val channels = JSONArray()
+        _queue.value.forEach { c ->
+            val o = JSONObject()
+                .put("name", c.name)
+                .put("url", c.url)
+                .put("format", caster.formatOf(c.url))
+            c.userAgent?.let { o.put("ua", it) }
+            c.referrer?.let { o.put("ref", it) }
+            val shows = guide.programmesFor(c, now).filter { it.start < now + 6 * 3_600_000L }.take(5)
+            if (shows.isNotEmpty()) {
+                o.put("p", JSONArray().apply {
+                    shows.forEach { put(JSONObject().put("t", it.title).put("s", it.start / 1000).put("e", it.stop / 1000)) }
+                })
+            }
+            channels.put(o)
+        }
+        return JSONObject().put("channels", channels).toString()
+    }
+
+    override fun onCleared() {
+        lineupServer.stop()
+    }
+
     fun installReceiver(password: String) {
         val device = _castTarget.value ?: return
         viewModelScope.launch {
@@ -240,7 +311,10 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
             _castMessage.value = "Installing the receiver on ${device.name}…"
             try {
                 caster.installReceiver(device, password)
+                // Kept on this phone only, so later receiver updates install without asking.
+                castPrefs.edit().putString("dev_password_${device.host}", password).apply()
                 _receiverMissing.value = false
+                _receiverUpdate.value = false
                 _castMessage.value = "Installed. Starting the channel…"
                 kotlinx.coroutines.delay(1_500)
                 sendToRoku()
@@ -298,12 +372,19 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun sendToRoku() {
         val device = _castTarget.value ?: return
-        val channel = _playing.value?.let { _queue.value.getOrNull(it) } ?: return
+        val index = _playing.value ?: return
+        val channel = _queue.value.getOrNull(index) ?: return
         viewModelScope.launch {
             _receiverMissing.value = false
+            _receiverUpdate.value = false
             _castMessage.value = "Sending ${channel.name} to ${device.name}…"
+            if (!ensureReceiverCurrent(device)) return@launch
+            // Hand the TV the whole lineup so its remote can change channels and open the guide.
+            val extra = lineupServer.start(viewModelScope)?.let { url ->
+                mapOf("lineup" to url, "index" to "$index", "v" to lineupVersion())
+            }.orEmpty()
             _castMessage.value = try {
-                caster.play(device, channel)
+                caster.play(device, channel, extra)
                 if (channel.userAgent != null || channel.referrer != null) {
                     "Playing on ${device.name}. This channel needs special headers, so it may not load on Roku."
                 } else {

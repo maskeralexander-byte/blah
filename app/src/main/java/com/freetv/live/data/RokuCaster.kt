@@ -70,8 +70,9 @@ class RokuCaster(private val context: Context) {
     }
 
     /** Opens [channel]'s stream on the Roku. Throws with a readable message on failure. */
-    suspend fun play(device: RokuDevice, channel: Channel) = withContext(Dispatchers.IO) {
+    suspend fun play(device: RokuDevice, channel: Channel, extra: Map<String, String> = emptyMap()) = withContext(Dispatchers.IO) {
         val params = buildList {
+            extra.forEach { (k, v) -> add(k to v) }
             add("contentId" to channel.url)
             add("mediaType" to "live")
             add("title" to channel.name)
@@ -249,7 +250,26 @@ class RokuCaster(private val context: Context) {
         null
     }
 
-    private fun formatOf(url: String): String {
+    /** Version of the receiver installed on the Roku ("1.1.0"), or null if it isn't installed. */
+    suspend fun receiverVersion(device: RokuDevice): String? = withContext(Dispatchers.IO) {
+        try {
+            val conn = (URL("http://${device.host}:8060/query/apps").openConnection() as HttpURLConnection).apply {
+                connectTimeout = 2_500
+                readTimeout = 2_500
+            }
+            try {
+                val xml = conn.inputStream.bufferedReader().use { it.readText() }
+                Regex("""<app[^>]*\bid="dev"[^>]*>""").find(xml)?.value
+                    ?.let { Regex("""version="([^"]+)"""").find(it)?.groupValues?.get(1) }
+            } finally {
+                conn.disconnect()
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun formatOf(url: String): String {
         val path = Uri.parse(url).path.orEmpty().lowercase()
         return when {
             path.endsWith(".mp4") || path.endsWith(".m4v") -> "mp4"

@@ -103,17 +103,28 @@ fun CastDialog(vm: TvViewModel, onDismiss: () -> Unit) {
 @Composable
 fun ReceiverSetup(vm: TvViewModel, modifier: Modifier = Modifier) {
     val installing by vm.installing.collectAsState()
+    val update by vm.receiverUpdate.collectAsState()
     var password by remember { mutableStateOf("") }
     Surface(modifier, shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("One-time Roku setup", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "Your Roku needs the small Free Live TV receiver app. You only do this once.",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Text("1. On the Roku remote, press: Home ×3, Up ×2, Right, Left, Right, Left, Right.", style = MaterialTheme.typography.bodyMedium)
-            Text("2. Choose \"Enable installer and restart\", agree, and set a password. The Roku restarts.", style = MaterialTheme.typography.bodyMedium)
-            Text("3. Enter that password here and tap Install.", style = MaterialTheme.typography.bodyMedium)
+            if (update) {
+                Text("Update the Roku receiver", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "The new version adds the TV guide and channel changing with the Roku remote. " +
+                        "Enter your Developer Mode password and tap Install. The app remembers it, so " +
+                        "future updates install on their own.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            } else {
+                Text("One-time Roku setup", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Your Roku needs the small Free Live TV receiver app. You only do this once.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text("1. On the Roku remote, press: Home ×3, Up ×2, Right, Left, Right, Left, Right.", style = MaterialTheme.typography.bodyMedium)
+                Text("2. Choose \"Enable installer and restart\", agree, and set a password. The Roku restarts.", style = MaterialTheme.typography.bodyMedium)
+                Text("3. Enter that password here and tap Install.", style = MaterialTheme.typography.bodyMedium)
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(
                     password, { password = it }, Modifier.weight(1f),
