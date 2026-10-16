@@ -158,10 +158,12 @@ function scan() {
   let parsed = found.map(parseGrid).filter(p => p.cols.length && Object.keys(p.data).length);
   // If no table gave recognizable columns, read the screen the way a person does.
   if (!parsed.some(p => p.cols.some(c => c.key))) {
-    const vis = docs().map(readVisual).filter(Boolean);
+    const vis = docs().map(d => readVisual(d)).filter(Boolean);
     if (vis.length) parsed = vis;
   }
-  if (!parsed.length) for (const d of docs()) { const p = readTiles(d); if (p) parsed.push(p); }
+  L.hourNow = null;
+  for (const d of docs()) { const hv = readVisual(d, HOUR_RE, 2); if (hv) { L.hourNow = hv; break; } }
+  if (!parsed.length && !L.hourNow) for (const d of docs()) { const p = readTiles(d); if (p) parsed.push(p); }
   return parsed;
 }
 
@@ -189,6 +191,7 @@ function parseGrid(grid) {
   const hr = findHeaderRow(grid);
   const headers = grid[hr].map((h, i) => String(h || "").trim() || `Column ${i + 1}`);
   const rows = grid.slice(hr + 1).filter(r => r.filter(c => String(c).trim() !== "").length > 1);
+  if (headers.some((_, j) => rows.length && rows.filter(r => HOUR_RE.test(String(r[j] || "").trim())).length >= rows.length * 0.5)) return { headers, cols: [], data: {} };
   const map = autoMap(headers);
   let si = map.store;
   const idShare = j => rows.length ? rows.filter(r => storeId(r[j])).length / rows.length : 0;
@@ -217,7 +220,8 @@ function parseGrid(grid) {
 // Reads any store table by position on screen, however the page builds it: finds a column of
 // store numbers, takes the numbers on the same line as each, and names each number by the header
 // label directly above its column.
-function readVisual(d) {
+const HOUR_RE = /^(\d{1,2})(?::(\d\d))?\s*([AP])M?\s*-\s*(\d{1,2})(?::(\d\d))?\s*([AP])M?$/i;
+function readVisual(d, keyRe = /^\d{3,6}$/, minRows = 3) {
   if (!d.body) return null;
   const skipSel = "script,style,svg,canvas,select,option,noscript,[data-pwr-live]";
   const leaves = [];
@@ -239,12 +243,15 @@ function readVisual(d) {
     x.left = br.left; x.right = br.right; x.cx = br.left + br.width / 2;
   }
   const groups = new Map();
-  for (const x of leaves) if (/^\d{3,6}$/.test(x.text)) { const k = Math.round(x.r.left / 8); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(x); }
-  let ids = [...groups.values()].filter(g => g.length >= 3).sort((a, b) => b.length - a.length)[0];
+  for (const x of leaves) if (keyRe.test(x.text)) { const k = Math.round(x.r.left / 8); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(x); }
+  let ids = [...groups.values()].filter(g => g.length >= minRows).sort((a, b) => b.length - a.length)[0];
   if (!ids) return null;
   const seen = new Set(); ids = ids.filter(x => !seen.has(x.text) && seen.add(x.text)); // frozen-column copies
   const rowOf = idl => { const band = Math.max(6, idl.r.height * 0.6); return leaves.filter(x => x !== idl && x.cx > idl.r.right && Math.abs(x.cy - idl.cy) < band && parseNumber(x.text) != null); };
   const top = Math.min(...ids.map(x => x.r.top));
+  // The store picked in PWR's filter (e.g. "2058" or "Store-2058") above the table.
+  const scopeLeaf = leaves.find(x => x.r.bottom <= top && /^(store[\s#:-]*)?\d{3,6}$/i.test(x.text));
+  const scope = scopeLeaf ? scopeLeaf.text.match(/\d{3,6}/)[0] : null;
   const centers = rowOf(ids[0]).map(x => x.cx);
   const heads = leaves.filter(x => x.r.bottom <= top + 2 && x.r.bottom >= top - 260 && parseNumber(x.text) == null && !/^group\b/i.test(x.text) &&
     centers.filter(c => c >= x.left - 2 && c <= x.right + 2).length <= 1);
@@ -268,7 +275,7 @@ function readVisual(d) {
   if (!labels.length) return null;
   const map = autoMap(labels);
   const keyOf = j => Object.keys(map).find(k => map[k] === j && M[k]) || null;
-  return { headers: labels, cols: labels.map((label, j) => ({ id: label, label, key: keyOf(j) })), data, raw };
+  return { headers: labels, cols: labels.map((label, j) => ({ id: label, label, key: keyOf(j) })), data, raw, scope };
 }
 
 // Tile dashboards (like Service & Labor Summary): pair each number with the label just above it
@@ -310,12 +317,12 @@ function readTiles(d) {
 
 /* ---------- Session history ---------- */
 const KEY = "pwrLive.v1";
-const L = { snaps: [], cols: [], colSeen: {}, raw: {}, acc: {}, accLog: [], checkedAt: null, lastChangeAt: {}, interval: 15, sort: null, sortDir: -1, metric: null, mini: false, err: "" };
+const L = { snaps: [], cols: [], colSeen: {}, raw: {}, acc: {}, accLog: [], hourly: {}, hourlyPick: null, checkedAt: null, lastChangeAt: {}, interval: 15, sort: null, sortDir: -1, metric: null, mini: false, err: "" };
 try {
   const saved = JSON.parse(sessionStorage.getItem(KEY) || "null");
-  if (saved && saved.snaps && saved.snaps.length && Date.now() - saved.snaps[saved.snaps.length - 1].t < 2 * 3600e3) Object.assign(L, { snaps: saved.snaps, cols: saved.cols || [], colSeen: saved.colSeen || {}, raw: saved.raw || {}, acc: saved.acc || {}, accLog: saved.accLog || [], lastChangeAt: saved.lastChangeAt || {} });
+  if (saved && saved.snaps && saved.snaps.length && Date.now() - saved.snaps[saved.snaps.length - 1].t < 2 * 3600e3) Object.assign(L, { snaps: saved.snaps, cols: saved.cols || [], colSeen: saved.colSeen || {}, raw: saved.raw || {}, acc: saved.acc || {}, accLog: saved.accLog || [], hourly: saved.hourly || {}, lastChangeAt: saved.lastChangeAt || {} });
 } catch (e) { /* storage blocked: history lasts until the page reloads */ }
-const save = () => { try { sessionStorage.setItem(KEY, JSON.stringify({ snaps: L.snaps.slice(-720), cols: L.cols, colSeen: L.colSeen, raw: L.raw, acc: L.acc, accLog: L.accLog, lastChangeAt: L.lastChangeAt })); } catch (e) {} };
+const save = () => { try { sessionStorage.setItem(KEY, JSON.stringify({ snaps: L.snaps.slice(-720), cols: L.cols, colSeen: L.colSeen, raw: L.raw, acc: L.acc, accLog: L.accLog, hourly: L.hourly, lastChangeAt: L.lastChangeAt })); } catch (e) {} };
 
 // Year-over-year %, SPLH (sales ÷ labor hours), and projected end of day (today × last year's full day ÷ last year so far).
 function addDerived(data) {
@@ -333,6 +340,8 @@ function tick() {
   try { found = scan(); } catch (e) { L.err = "Couldn't read the page: " + e.message; render(); return; }
   L.found = found;
   L.checkedAt = Date.now();
+  if (L.hourNow) saveHourly(L.hourNow);
+  if (!found.length && L.hourNow) { L.err = ""; L.info = null; if (L.autoMini) { L.autoMini = false; api.show(); return; } render(); return; }
   if (!found.length) {
     const signIn = docs().some(d => [...d.querySelectorAll('input[type="password"]')].some(visible));
     if (signIn) {
@@ -431,6 +440,39 @@ function setManual(key, id) {
 // SPLH goal: from the analyzer's Targets, or set right in the panel (kept in this browser).
 let splhGoal = TGT.splh ?? null;
 try { const g = localStorage.getItem("pwrLive.splhGoal"); if (g) splhGoal = +g; } catch (e) {}
+/* ---------- SPLH from PWR's Real Time Hourly Sales ----------
+   Each hour row has that hour's sales and the average crew (# DE + # Inside). Labor hours for the
+   row = average crew × hours in the block (the current hour counts only the minutes so far). */
+function hourSpan(label, now) {
+  const m = String(label).trim().match(HOUR_RE); if (!m) return null;
+  const to24 = (h, mm, ap) => (+h % 12 + (ap.toUpperCase() === "P" ? 12 : 0)) + (+(mm || 0)) / 60;
+  const a = to24(m[1], m[2], m[3]); let b = to24(m[4], m[5], m[6]); if (b <= a) b += 24;
+  const nowH = now.getHours() + now.getMinutes() / 60;
+  const done = nowH >= b || nowH < a; // past block (or a day view after hours)
+  return { a, b, hours: done ? b - a : Math.max(0, nowH - a), current: !done };
+}
+function saveHourly(hv) {
+  const cols = hv.cols, key = k => cols.find(c => c.key === k);
+  const pick = k => manual[k] && cols.find(c => c.id === manual[k]) || key(k);
+  const sa = pick("sales"), de = pick("drivers_on"), ins = pick("inside_on");
+  const now = new Date(), rows = [];
+  for (const [label, d] of Object.entries(hv.data)) {
+    const sp = hourSpan(label, now); if (!sp) continue;
+    const crew = (de ? d[de.id] || 0 : 0) + (ins ? d[ins.id] || 0 : 0);
+    rows.push({ label, a: sp.a, current: sp.current, sales: sa ? d[sa.id] ?? null : null, crew, hrs: crew * sp.hours });
+  }
+  rows.sort((x, y) => x.a - y.a);
+  const st = hv.scope || "This store";
+  L.hourly[st] = { t: L.checkedAt, rows, salesCol: sa ? sa.label : null, crewCols: [de, ins].filter(Boolean).map(c => c.label), allCols: cols.map(c => c.label) };
+  L.hourlyPick = st;
+  save();
+}
+function hourlySplh(st) {
+  const hd = L.hourly[st]; if (!hd || !hd.salesCol) return null;
+  let s = 0, hh = 0; for (const r of hd.rows) if (r.sales != null && r.hrs > 0) { s += r.sales; hh += r.hrs; }
+  return hh > 0 ? { sales: s, hrs: hh, splh: s / hh } : null;
+}
+
 /* ---------- Live labor and SPLH ----------
    PWR shows who is on the clock right now (Current Labor Hours, or # DE + # Inside) but not labor
    hours worked so far. PWR Live counts them itself: every check it adds people-on-the-clock ×
@@ -677,8 +719,9 @@ function render() {
     body.append(h("div", { class: "muted" }, `What PWR Live sees: ${i.tables} table${i.tables === 1 ? "" : "s"}, ${i.grids} grid${i.grids === 1 ? "" : "s"}, ${i.frames} embedded section${i.frames === 1 ? "" : "s"}` +
       (i.blocked.length ? ` (${i.blocked.length} unreadable: ${[...new Set(i.blocked.map(b => b.host))].join(", ")})` : "") + ". If the report is on screen and this still shows nothing, send a screenshot of this panel."));
   }
-  if (!now) return;
+  if (!now && !Object.keys(L.hourly).length) return;
 
+  if (now) {
   // Headline numbers for the whole group on screen.
   const kp = h("div", { class: "kpis" });
   if (sa) {
@@ -698,11 +741,37 @@ function render() {
   }
   kp.append(h("div", { class: "kpi" }, h("div", { class: "l" }, "Last change seen"), h("div", { class: "v" }, clock(now.t)), h("div", { class: "n" }, ago(now.t))));
   body.append(kp);
+  }
 
   // Live SPLH tracker.
   const spBox = h("div", null, h("h3", null, "Live SPLH (sales per labor hour)"));
-  const mode = laborMode();
   const goalVs = v => splhGoal && v != null ? h("span", { class: v >= splhGoal ? "up" : "down" }, `${v >= splhGoal ? "▲" : "▼"} ${money(Math.abs(v - splhGoal))} vs goal`) : "";
+  const hStores = Object.keys(L.hourly);
+  const hst = L.hourly[L.hourlyPick] ? L.hourlyPick : hStores[0];
+  const mode = hst ? null : laborMode();
+  const goalCls2 = v => v == null || !splhGoal ? "" : v >= splhGoal ? "good" : v < splhGoal * 0.8 ? "bad" : "warn";
+  if (hst) {
+    const hd = L.hourly[hst], tot = hourlySplh(hst);
+    const done = hd.rows.filter(r => !r.current && r.sales != null && r.hrs > 0), lastH = done[done.length - 1], cur = hd.rows.find(r => r.current);
+    spBox.append(h("div", { class: "row", style: "margin-bottom:6px" }, h("span", { class: "muted" }, "Store"),
+      hStores.length > 1 ? h("select", { "aria-label": "Store", onchange: e => { L.hourlyPick = e.target.value; render(); } }, hStores.map(s => h("option", { value: s, selected: s === hst ? "" : null }, s))) : h("b", null, hst),
+      h("span", { class: "muted" }, `from Real Time Hourly Sales, read ${ago(hd.t)}`)));
+    if (!hd.salesCol) spBox.append(h("div", { class: "al warn" }, `Couldn't find the sales column on Hourly Sales. Columns seen: ${hd.allCols.join(", ")}. Pick it below.`));
+    spBox.append(h("div", { class: "kpis" },
+      h("div", { class: "kpi" }, h("div", { class: "l" }, "Today so far"), h("div", { class: "v" }, tot ? money(tot.splh) : "–"),
+        h("div", { class: "n" }, tot ? [goalVs(tot.splh), h("div", null, `${money(tot.sales)} on ${tot.hrs.toFixed(1)} labor hrs`)] : "")),
+      h("div", { class: "kpi" }, h("div", { class: "l" }, cur ? `This hour (${cur.label}, so far)` : lastH ? `Last hour (${lastH.label})` : "Last hour"),
+        h("div", { class: "v" }, (cur && cur.hrs > 0 && cur.sales != null) ? money(cur.sales / cur.hrs) : lastH ? money(lastH.sales / lastH.hrs) : "–"),
+        h("div", { class: "n" }, (cur && cur.hrs > 0 && cur.sales != null) ? goalVs(cur.sales / cur.hrs) : lastH ? goalVs(lastH.sales / lastH.hrs) : ""))));
+    spBox.append(h("div", { class: "scroll", style: "margin-top:8px" }, h("table", null,
+      h("thead", null, h("tr", null, h("th", null, "Hour"), h("th", null, "Sales"), h("th", null, "Crew"), h("th", null, "Labor hrs"), h("th", null, "SPLH"))),
+      h("tbody", null, hd.rows.map(r => { const v = r.sales != null && r.hrs > 0 ? r.sales / r.hrs : null;
+        return h("tr", null, h("td", null, r.label + (r.current ? " (now)" : "")), h("td", null, r.sales != null ? money(r.sales) : "–"), h("td", null, r.crew.toFixed(1)), h("td", null, r.hrs.toFixed(1)), h("td", { class: goalCls2(v) }, v != null ? money(v) : "–")); })))));
+    spBox.append(h("div", { class: "row", style: "margin-top:6px" }, h("span", { class: "muted" }, "Hourly sales column"),
+      h("select", { "aria-label": "Hourly sales column", onchange: e => { setManual("sales", e.target.value); tick(); } }, h("option", { value: "" }, "— choose —"),
+        hd.allCols.map(c => h("option", { value: c, selected: c === hd.salesCol ? "" : null }, c)))));
+    spBox.append(h("div", { class: "muted", style: "margin-top:6px" }, `Labor hours = average crew (${hd.crewCols.join(" + ") || "# DE + # Inside"}) × hours in each block. Open Hourly Sales for another store to add it here.`));
+  }
   if (mode) {
     const rec = splhRecent(null), since = mode === "tracked" ? splhSince(null) : null, day = mode === "pwr" ? splhNow(null) : null;
     const crew = crewNow(null), sup = crewSupported(null);
@@ -717,7 +786,7 @@ function render() {
         h("div", { class: "n" }, sup != null ? h("span", { class: sup >= crew ? "up" : "down" }, `Sales pace supports ${sup.toFixed(1)} at ${money(splhGoal)}`) : (splhGoal ? "Staffing check appears after 10 min." : "Set a goal to see the staffing check."))) : null);
     spBox.append(grid);
     if (mode === "tracked") spBox.append(h("div", { class: "muted", style: "margin-top:6px" }, `PWR doesn't show hours worked, so PWR Live counts them from people on the clock every check since you opened it. Keep the panel open (minimized is fine) and it keeps counting while you move around PWR.`));
-  } else spBox.append(h("div", { class: "muted" }, "Open Real Time Labor so PWR Live can see who's on the clock (Current Labor Hours, # DE, # Inside). If it still doesn't appear, pick the columns below."));
+  } else if (!hst) spBox.append(h("div", { class: "muted" }, "Open Real Time Hourly Sales for a store: PWR Live works out SPLH from each hour's sales and crew. If a column is missed, pick it below."));
   spBox.append(h("div", { class: "row", style: "margin-top:6px" }, h("label", { class: "muted", for: "splhGoal" }, "SPLH goal $"),
     h("input", { id: "splhGoal", type: "number", inputmode: "decimal", step: "any", value: splhGoal ?? "", placeholder: "e.g. 61", style: "width:90px;border:1px solid var(--line);border-radius:8px;padding:5px 6px;background:var(--bg);color:var(--ink)",
       onchange: e => { splhGoal = e.target.value === "" ? null : +e.target.value; try { e.target.value === "" ? localStorage.removeItem("pwrLive.splhGoal") : localStorage.setItem("pwrLive.splhGoal", String(splhGoal)); } catch (x) {} render(); } })));
@@ -727,6 +796,7 @@ function render() {
       h("option", { value: "" }, "— choose —"), numericCols.map(c => h("option", { value: c.id, selected: c.key === key ? "" : null }, c.label))));
   if (numericCols.length) spBox.append(picker("sales", "Sales column"), picker("labor_rate", "People on the clock column"), picker("labor_hours", "Hours worked today column (only if PWR shows one)"));
   body.append(spBox);
+  if (!now) return;
 
   // Alerts.
   const al = alerts(); L.alertCount = al.filter(a => a.sev !== "good").length;
