@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- Builds the TimeGrid content (channels with their programmes) off the render thread. -->
+<component name="GuideTask" extends="Task">
+    <interface>
+        <field id="channels" type="array" />
+        <!-- { mode: "all" | "fav" | "recent" | "group" | "search", value: String, recents: [urls] } -->
+        <field id="filter" type="assocarray" />
+        <field id="rowMap" type="array" />
+        <field id="startTime" type="integer" />
+        <field id="content" type="node" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/GuideTask.brs" />
+</component>

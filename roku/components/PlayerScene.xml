@@ -27,18 +27,47 @@
                 text="Up/Down change channel  ·  OK guide  ·  Back exit" />
         </Group>
 
-        <!-- On-screen guide. -->
+        <!-- Cable-style guide: preview header, category menu with search, and a time grid. -->
         <Group id="guide" visible="false">
-            <Rectangle width="840" height="1080" color="0x0E0E14F2" />
-            <Label translation="[64, 48]" width="720" font="font:LargeBoldSystemFont" color="0xFFFFFFFF" text="Guide" />
-            <Label id="guideHint" translation="[64, 112]" width="720" font="font:SmallestSystemFont" color="0x888899FF"
-                text="OK to watch  ·  Back to close" />
-            <MarkupList id="guideList" translation="[40, 160]" itemComponentName="GuideItem"
-                itemSize="[760, 112]" itemSpacing="[0, 6]" numRows="8" vertFocusAnimationStyle="floatingFocus"
-                drawFocusFeedback="false" />
+            <Rectangle width="1920" height="1080" color="0x1B2140F5" />
+
+            <!-- Preview of the focused programme. -->
+            <Rectangle translation="[0, 0]" width="1920" height="440" color="0x2A3366FF" />
+            <Rectangle translation="[96, 60]" width="480" height="270" color="0x11152BFF" />
+            <Poster id="previewLogo" translation="[136, 95]" width="400" height="200" loadDisplayMode="scaleToFit" />
+            <Label id="previewTitle" translation="[640, 60]" width="1000" font="font:LargeBoldSystemFont" color="0xFFFFFFFF" />
+            <Label id="previewChannel" translation="[640, 120]" width="1000" font="font:MediumSystemFont" color="0xDDE2FFFF" />
+            <Label id="previewTime" translation="[640, 170]" width="1000" font="font:SmallSystemFont" color="0xB8C0F0FF" />
+            <Label id="previewDesc" translation="[640, 220]" width="1180" height="120" wrap="true" maxLines="3"
+                font="font:SmallSystemFont" color="0xEEEEFFFF" />
+            <Label id="clock" translation="[1580, 60]" width="244" horizAlign="right" font="font:MediumSystemFont" color="0xFFFFFFFF" />
+            <Label id="hint" translation="[640, 360]" width="1180" font="font:SmallestSystemFont" color="0x9FA8DDFF"
+                text="OK watch  ·  Left for menu and search  ·  Back close" />
+
+            <!-- Category menu. -->
+            <Rectangle translation="[0, 440]" width="380" height="640" color="0x141936FF" />
+            <LabelList id="menu" translation="[40, 480]" itemSize="[310, 60]" numRows="9"
+                color="0xDDE2FFFF" focusedColor="0x141936FF" />
+
+            <!-- Search (replaces the menu while active). -->
+            <Group id="searchPanel" visible="false">
+                <Rectangle translation="[0, 440]" width="380" height="640" color="0x141936FF" />
+                <Label translation="[30, 470]" width="330" font="font:SmallBoldSystemFont" color="0xFFFFFFFF" text="Search channels and shows" />
+                <Label id="searchText" translation="[30, 515]" width="330" font="font:MediumSystemFont" color="0x8B73FFFF" text=" " />
+                <MiniKeyboard id="keyboard" translation="[16, 570]" />
+            </Group>
+
+            <TimeGrid id="grid" translation="[400, 450]" numRows="6" duration="7200"
+                channelInfoWidth="200" channelNoDataText="Live programming" loadingDataText="Loading guide…"
+                programTitleColor="0xFFFFFFFF" programTitleFocusedColor="0x141936FF"
+                timeLabelColor="0xDDE2FFFF" channelInfoColor="0xFFFFFFFF" />
+            <Label id="emptyText" translation="[400, 700]" width="1440" horizAlign="center" visible="false"
+                font="font:MediumSystemFont" color="0xDDE2FFFF" text="No channels here yet." />
         </Group>
 
         <Timer id="bannerTimer" duration="6" />
         <Timer id="refreshTimer" duration="300" repeat="true" />
+        <Timer id="clockTimer" duration="20" repeat="true" />
+        <Timer id="searchTimer" duration="0.6" />
     </children>
 </component>

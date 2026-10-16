@@ -76,9 +76,13 @@ It's installed once:
 `roku-receiver.zip`, which the build outputs to `app/build/generated/roku-assets/`.)
 
 **On the TV:** while casting, the Roku gets the whole channel list and guide from the phone, so
-the Roku remote works on its own. **Up/Down** change channel, **OK** opens the on-screen guide (what's
-on now and next, with progress), **Left/Right** show the channel banner, **Back** closes the guide or
-exits. The Roku keeps a copy of the lineup, so it keeps working if the phone app closes, and you can
+the Roku remote works on its own. **Up/Down** change channel, **OK** opens the guide, **Left/Right**
+show the channel banner, **Back** closes the guide or exits.
+
+The guide is laid out like a cable guide: a preview of the focused show (logo, title, times,
+description, clock) on top, a time grid of channels and shows below, and a menu on the left
+(**Left** from the grid) with All Channels, Favorites, Recents, the biggest categories and **Search**,
+which filters channels and shows as you type on the on-screen keyboard. The Roku keeps a copy of the lineup, so it keeps working if the phone app closes, and you can
 open Free Live TV straight from the Roku home screen to pick up where you left off. (Guide times
 refresh from the phone every 5 minutes while it's reachable.)
 

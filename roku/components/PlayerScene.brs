@@ -8,7 +8,20 @@ sub init()
     m.bannerNow = m.top.FindNode("bannerNow")
     m.bannerNext = m.top.FindNode("bannerNext")
     m.guide = m.top.FindNode("guide")
-    m.guideList = m.top.FindNode("guideList")
+    m.grid = m.top.FindNode("grid")
+    m.menu = m.top.FindNode("menu")
+    m.searchPanel = m.top.FindNode("searchPanel")
+    m.searchText = m.top.FindNode("searchText")
+    m.keyboard = m.top.FindNode("keyboard")
+    m.emptyText = m.top.FindNode("emptyText")
+    m.previewLogo = m.top.FindNode("previewLogo")
+    m.previewTitle = m.top.FindNode("previewTitle")
+    m.previewChannel = m.top.FindNode("previewChannel")
+    m.previewTime = m.top.FindNode("previewTime")
+    m.previewDesc = m.top.FindNode("previewDesc")
+    m.clock = m.top.FindNode("clock")
+    m.clockTimer = m.top.FindNode("clockTimer")
+    m.searchTimer = m.top.FindNode("searchTimer")
     m.bannerTimer = m.top.FindNode("bannerTimer")
     m.refreshTimer = m.top.FindNode("refreshTimer")
 
@@ -20,9 +33,19 @@ sub init()
     m.lineupUri = ""
     m.lineupVersion = ""
     m.guideBuiltAt = 0
+    m.rowMap = []
+    m.filter = { mode: "all" }
+    m.menuFilters = []
+    m.recents = ParseJson(m.registry.Read("recents"))
+    if m.recents = invalid then m.recents = []
 
     m.video.ObserveField("state", "onVideoState")
-    m.guideList.ObserveField("itemSelected", "onGuideSelected")
+    m.grid.ObserveField("programFocusedDetails", "onProgramFocused")
+    m.grid.ObserveField("programSelected", "onProgramSelected")
+    m.menu.ObserveField("itemSelected", "onMenuSelected")
+    m.keyboard.ObserveField("text", "onSearchTyped")
+    m.searchTimer.ObserveField("fire", "runSearch")
+    m.clockTimer.ObserveField("fire", "updateClock")
     m.bannerTimer.ObserveField("fire", "hideBanner")
     m.refreshTimer.ObserveField("fire", "refreshLineup")
     m.refreshTimer.control = "start"
@@ -91,7 +114,7 @@ sub onLineup()
     if lineup = invalid or lineup.channels = invalid then return
     m.channels = lineup.channels
     m.guideBuiltAt = 0
-    if m.guide.visible then buildGuide()
+    if m.guide.visible then buildGuide(false)
 
     if m.channels.Count() = 0
         showStatus("Free Live TV", "Open Free Live TV on your phone, pick a channel and tap the cast icon.")
@@ -120,6 +143,7 @@ sub playIndex(i as Integer)
     ch = m.channels[i]
     m.index = i
     m.registry.Write("index", i.ToStr())
+    addRecent(ch.url)
     m.registry.Flush()
     playStream(ch.url, valueOr(ch.name, ""), valueOr(ch.format, "hls"), valueOr(ch.ua, ""), valueOr(ch.ref, ""))
     showBanner()
@@ -199,50 +223,171 @@ end sub
 
 sub openGuide()
     if m.channels.Count() = 0 then return
-    now = CreateObject("roDateTime").AsSeconds()
-    if now - m.guideBuiltAt > 60 then buildGuide()
     m.banner.visible = false
     m.guide.visible = true
-    m.guideList.jumpToItem = m.index
-    m.guideList.SetFocus(true)
+    updateClock()
+    m.clockTimer.control = "start"
+    buildMenu()
+    now = CreateObject("roDateTime").AsSeconds()
+    if m.guideBuiltAt = 0 or now - m.guideBuiltAt > 300
+        buildGuide(true)
+    else
+        focusGrid(true)
+    end if
 end sub
 
 sub closeGuide()
     m.guide.visible = false
+    m.searchPanel.visible = false
+    m.menu.visible = true
+    m.clockTimer.control = "stop"
     m.top.SetFocus(true)
 end sub
 
-sub buildGuide()
-    now = CreateObject("roDateTime").AsSeconds()
-    root = CreateObject("roSGNode", "ContentNode")
-    for i = 0 to m.channels.Count() - 1
-        ch = m.channels[i]
-        item = root.CreateChild("ContentNode")
-        item.title = (i + 1).ToStr() + "    " + valueOr(ch.name, "")
-        nn = nowNext(ch)
-        progress = 0.0
-        if nn.now <> invalid
-            item.description = "Now: " + nn.now.t + "  ·  until " + fmtTime(nn.now.e)
-            span = nn.now.e - nn.now.s
-            if span > 0 then progress = (now - nn.now.s) / span
-        else
-            item.description = ""
+' Left-hand menu: fixed entries, the biggest categories, then Search.
+sub buildMenu()
+    counts = {}
+    for each ch in m.channels
+        if ch.g <> invalid and ch.g <> "" and ch.g <> "Other"
+            if counts.DoesExist(ch.g) then counts[ch.g] = counts[ch.g] + 1 else counts[ch.g] = 1
         end if
-        if nn.next <> invalid
-            item.shortDescriptionLine2 = "Next: " + nn.next.t + " at " + fmtTime(nn.next.s)
-        else
-            item.shortDescriptionLine2 = ""
-        end if
-        item.AddFields({ progress: progress })
     end for
-    m.guideList.content = root
-    m.guideBuiltAt = now
+    groups = []
+    for each g in counts
+        groups.Push({ name: g, n: counts[g] })
+    end for
+    groups.SortBy("n", "r")
+
+    m.menuFilters = [{ mode: "all" }, { mode: "fav" }, { mode: "recent" }]
+    labels = ["All Channels", "Favorites", "Recents"]
+    for i = 0 to groups.Count() - 1
+        if i >= 8 then exit for
+        m.menuFilters.Push({ mode: "group", value: groups[i].name })
+        labels.Push(groups[i].name)
+    end for
+    m.menuFilters.Push({ mode: "search", value: "" })
+    labels.Push("Search")
+
+    root = CreateObject("roSGNode", "ContentNode")
+    for each label in labels
+        item = root.CreateChild("ContentNode")
+        item.title = label
+    end for
+    m.menu.content = root
 end sub
 
-sub onGuideSelected()
-    idx = m.guideList.itemSelected
+sub onMenuSelected()
+    f = m.menuFilters[m.menu.itemSelected]
+    if f = invalid then return
+    if f.mode = "search"
+        m.menu.visible = false
+        m.searchPanel.visible = true
+        m.keyboard.text = ""
+        m.searchText.text = " "
+        m.keyboard.SetFocus(true)
+        m.filter = { mode: "search", value: "" }
+        buildGuide(false)
+        return
+    end if
+    m.filter = f
+    buildGuide(true)
+end sub
+
+sub onSearchTyped()
+    m.searchText.text = m.keyboard.text + " "
+    m.searchTimer.control = "stop"
+    m.searchTimer.control = "start"
+end sub
+
+sub runSearch()
+    m.filter = { mode: "search", value: m.keyboard.text }
+    buildGuide(false)
+end sub
+
+' Builds the grid for the current filter on a Task; focusAfter moves focus to the grid when ready.
+sub buildGuide(focusAfter as Boolean)
+    task = CreateObject("roSGNode", "GuideTask")
+    task.channels = m.channels
+    f = m.filter
+    f.recents = m.recents
+    task.filter = f
+    m.focusGridAfterBuild = focusAfter
+    task.ObserveField("content", "onGuideBuilt")
+    task.control = "RUN"
+    m.guideTask = task
+end sub
+
+sub onGuideBuilt()
+    task = m.guideTask
+    m.rowMap = task.rowMap
+    m.grid.contentStartTime = task.startTime
+    m.grid.content = task.content
+    m.guideBuiltAt = CreateObject("roDateTime").AsSeconds()
+    empty = (m.rowMap.Count() = 0)
+    m.emptyText.visible = empty
+    m.grid.visible = not empty
+    if empty
+        if m.filter.mode = "fav" then m.emptyText.text = "No favorites yet. Star channels in the phone app."
+        if m.filter.mode = "recent" then m.emptyText.text = "Nothing watched yet."
+        if m.filter.mode = "search" then m.emptyText.text = "No channels or shows match."
+        if m.filter.mode = "all" or m.filter.mode = "group" then m.emptyText.text = "No channels here yet."
+    end if
+    if m.focusGridAfterBuild then focusGrid(true)
+end sub
+
+' Focuses the grid, on the channel that's playing when it's in the list.
+sub focusGrid(jumpToCurrent as Boolean)
+    if m.rowMap.Count() = 0 then return
+    if jumpToCurrent
+        row = 0
+        for r = 0 to m.rowMap.Count() - 1
+            if m.rowMap[r] = m.index then row = r
+        end for
+        m.grid.jumpToChannel = row
+    end if
+    m.grid.SetFocus(true)
+end sub
+
+sub onProgramFocused()
+    d = m.grid.programFocusedDetails
+    if d = invalid then return
+    row = d.focusChannelIndex
+    if row = invalid or row < 0 or row >= m.rowMap.Count() then return
+    ch = m.channels[m.rowMap[row]]
+    prog = d.content
+    m.previewChannel.text = (m.rowMap[row] + 1).ToStr() + "   " + valueOr(ch.name, "")
+    if ch.logo <> invalid then m.previewLogo.uri = ch.logo else m.previewLogo.uri = ""
+    if prog <> invalid
+        m.previewTitle.text = prog.title
+        m.previewTime.text = fmtTime(prog.playStart) + " – " + fmtTime(prog.playStart + prog.playDuration)
+        m.previewDesc.text = prog.description
+    else
+        m.previewTitle.text = valueOr(ch.name, "")
+        m.previewTime.text = ""
+        m.previewDesc.text = ""
+    end if
+end sub
+
+sub onProgramSelected()
+    row = m.grid.channelFocused
+    if row = invalid or row < 0 or row >= m.rowMap.Count() then return
+    idx = m.rowMap[row]
     closeGuide()
     if idx <> m.index or m.video.state = "error" then playIndex(idx) else showBanner()
+end sub
+
+sub updateClock()
+    dt = CreateObject("roDateTime")
+    m.clock.text = fmtTime(dt.AsSeconds())
+end sub
+
+sub addRecent(url as String)
+    list = [url]
+    for each u in m.recents
+        if u <> url and list.Count() < 30 then list.Push(u)
+    end for
+    m.recents = list
+    m.registry.Write("recents", FormatJson(list))
 end sub
 
 ' ---- Remote ----
@@ -251,9 +396,29 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
     if not press then return false
 
     if m.guide.visible
-        if key = "back" or key = "left"
-            closeGuide()
+        inSearch = m.searchPanel.visible
+        if key = "back"
+            if m.keyboard.IsInFocusChain()
+                ' Leave search, back to the menu.
+                m.searchPanel.visible = false
+                m.menu.visible = true
+                m.menu.SetFocus(true)
+            else if m.grid.IsInFocusChain() and inSearch
+                m.keyboard.SetFocus(true)
+            else
+                closeGuide()
+            end if
             return true
+        else if key = "left" or key = "options"
+            if m.grid.IsInFocusChain()
+                if inSearch then m.keyboard.SetFocus(true) else m.menu.SetFocus(true)
+                return true
+            end if
+        else if key = "right"
+            if (m.menu.HasFocus() or m.keyboard.IsInFocusChain()) and m.rowMap.Count() > 0
+                focusGrid(false)
+                return true
+            end if
         end if
         return false
     end if

@@ -308,12 +308,13 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Changes whenever the lineup or guide changes, so the TV knows to reload it. */
     private fun lineupVersion(): String =
-        "${_queue.value.size}-${_queue.value.hashCode()}-${System.identityHashCode(_guide.value)}"
+        "${_queue.value.size}-${_queue.value.hashCode()}-${System.identityHashCode(_guide.value)}-${_favorites.value.hashCode()}"
 
     /** Channels in the current list with the next few hours of listings, for the Roku. */
     private fun lineupJson(): String {
         val now = System.currentTimeMillis()
         val guide = _guide.value
+        val favs = _favorites.value
         val channels = JSONArray()
         _queue.value.forEach { c ->
             val o = JSONObject()
@@ -322,10 +323,18 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
                 .put("format", caster.formatOf(c.url))
             c.userAgent?.let { o.put("ua", it) }
             c.referrer?.let { o.put("ref", it) }
-            val shows = guide.programmesFor(c, now).filter { it.start < now + 6 * 3_600_000L }.take(5)
+            c.logo?.let { o.put("logo", it) }
+            o.put("g", c.group)
+            if (c.url in favs) o.put("fav", true)
+            val shows = guide.programmesFor(c, now).filter { it.start < now + 6 * 3_600_000L }.take(8)
             if (shows.isNotEmpty()) {
                 o.put("p", JSONArray().apply {
-                    shows.forEach { put(JSONObject().put("t", it.title).put("s", it.start / 1000).put("e", it.stop / 1000)) }
+                    shows.forEachIndexed { n, show ->
+                        val item = JSONObject().put("t", show.title).put("s", show.start / 1000).put("e", show.stop / 1000)
+                        // Descriptions only for the first few shows, to keep the TV's download small.
+                        if (n < 3) show.description?.let { item.put("d", it.take(180)) }
+                        put(item)
+                    }
                 })
             }
             channels.put(o)
