@@ -1,6 +1,6 @@
 # PWR Analyzer
 
-A single-page tool for digging into Domino's store PWR (performance) reports. Open `index.html` in a browser, then import your export. Everything runs locally in the browser; no data is uploaded.
+Live analysis for Domino's PWR (pwr.dominos.com). The main tool is **PWR Live**, a bookmark that runs on the PWR sections you already use (Real Time, Keys, Service & Labor…); see below. `index.html` sets it up and can also analyze a table pasted or opened from a file. Everything runs locally in the browser; no data is uploaded.
 
 ## What it does
 
@@ -37,6 +37,7 @@ What it shows, refreshed every 5 to 60 seconds:
 - **Last 30 min vs last year**, for the group and for each store, so you can see who is slowing down right now.
 - **Needs attention**: stores behind last year, stores whose last-30-minute pace is 15%+ under last year, metrics past your targets (for example ADT), times rising fast, and stores that stopped reporting for 20+ minutes.
 - A **store table** you can sort by tapping a column, and a **chart** of any column since you started watching.
+- **Live SPLH** (sales per labor hour): today so far, and for just the last 30 minutes (new sales ÷ new labor hours), per store and for the group, against a goal you set in the panel. Labor hours come from the Real Time Labor tab; if PWR shows its own SPLH, that's used.
 - **Every PWR tab you visit adds to the board.** It reads tables (Real Time Sales, Real Time Labor, …) and tile screens (Service & Labor Summary: sales, PCYA, order count, Average Load, cDOT %, extreme deliveries, …) and merges them by store. Columns from a tab you're not on show how long ago they were read.
 - If the report sits in an embedded section from another address that the browser won't let it read, the panel says so and offers **Open report** to load that section by itself.
 - **Copy table for the analyzer** copies the current table so you can paste it into the full analyzer.

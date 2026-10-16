@@ -204,8 +204,9 @@ function parseGrid(grid) {
     if (vals.length && vals.filter(v => v != null).length >= vals.length * 0.5) cols.push({ id: label, label, key: keyOf(j), j });
   });
   const data = {};
-  for (const [st, r] of Object.entries(recs)) { data[st] = {}; for (const c of cols) data[st][c.id] = parseNumber(r[c.j]); }
-  return { headers, cols, data };
+  const raw = {};
+  for (const [st, r] of Object.entries(recs)) { data[st] = {}; raw[st] = {}; for (const c of cols) { data[st][c.id] = parseNumber(r[c.j]); raw[st][c.id] = String(r[c.j]).trim(); } }
+  return { headers, cols, data, raw };
 }
 
 // Tile dashboards (like Service & Labor Summary): pair each number with the label just above it
@@ -241,24 +242,27 @@ function readTiles(d) {
   const keyOf = j => Object.keys(map).find(k => map[k] === j && M[k]) || null;
   const cols = labels.map((label, j) => ({ id: label, label, key: keyOf(j) }));
   const data = { [st]: Object.fromEntries(labels.map((l, j) => [l, parseNumber(vals[j])])) };
-  return { headers: labels, cols, data };
+  const raw = { [st]: Object.fromEntries(labels.map((l, j) => [l, vals[j].replace(/^[↑↓▲▼⬆⬇]\s*/, "")])) };
+  return { headers: labels, cols, data, raw };
 }
 
 /* ---------- Session history ---------- */
 const KEY = "pwrLive.v1";
-const L = { snaps: [], cols: [], colSeen: {}, checkedAt: null, lastChangeAt: {}, interval: 15, sort: null, sortDir: -1, metric: null, mini: false, err: "" };
+const L = { snaps: [], cols: [], colSeen: {}, raw: {}, checkedAt: null, lastChangeAt: {}, interval: 15, sort: null, sortDir: -1, metric: null, mini: false, err: "" };
 try {
   const saved = JSON.parse(sessionStorage.getItem(KEY) || "null");
-  if (saved && saved.snaps && saved.snaps.length && Date.now() - saved.snaps[saved.snaps.length - 1].t < 2 * 3600e3) Object.assign(L, { snaps: saved.snaps, cols: saved.cols || [], colSeen: saved.colSeen || {}, lastChangeAt: saved.lastChangeAt || {} });
+  if (saved && saved.snaps && saved.snaps.length && Date.now() - saved.snaps[saved.snaps.length - 1].t < 2 * 3600e3) Object.assign(L, { snaps: saved.snaps, cols: saved.cols || [], colSeen: saved.colSeen || {}, raw: saved.raw || {}, lastChangeAt: saved.lastChangeAt || {} });
 } catch (e) { /* storage blocked: history lasts until the page reloads */ }
-const save = () => { try { sessionStorage.setItem(KEY, JSON.stringify({ snaps: L.snaps.slice(-720), cols: L.cols, colSeen: L.colSeen, lastChangeAt: L.lastChangeAt })); } catch (e) {} };
+const save = () => { try { sessionStorage.setItem(KEY, JSON.stringify({ snaps: L.snaps.slice(-720), cols: L.cols, colSeen: L.colSeen, raw: L.raw, lastChangeAt: L.lastChangeAt })); } catch (e) {} };
 
-// Year-over-year % and projected end of day (today × last year's full day ÷ last year so far).
+// Year-over-year %, SPLH (sales ÷ labor hours), and projected end of day (today × last year's full day ÷ last year so far).
 function addDerived(data) {
   const byKey = k => L.cols.find(c => c.key === k && !c.derived);
   const sa = byKey("sales"), py = byKey("py_sales"), eod = byKey("py_eod");
   const addCol = (id, label, key) => { if (!L.cols.some(c => c.id === id)) L.cols.push({ id, label, key, derived: true }); };
   if (sa && py && !byKey("pcya")) { addCol("PCYA (calc)", "vs last year", "pcya"); for (const d of Object.values(data)) d["PCYA (calc)"] = d[sa.id] != null && d[py.id] ? (d[sa.id] - d[py.id]) / d[py.id] * 100 : null; }
+  const hr = byKey("labor_hours");
+  if (sa && hr && !byKey("splh")) { addCol("SPLH (calc)", "SPLH", "splh"); for (const d of Object.values(data)) d["SPLH (calc)"] = d[sa.id] != null && d[hr.id] > 0 ? d[sa.id] / d[hr.id] : null; }
   if (sa && py && eod) { addCol("Projected EOD", "Projected EOD", "proj_eod"); for (const d of Object.values(data)) d["Projected EOD"] = d[sa.id] != null && d[py.id] && d[eod.id] != null ? d[sa.id] * d[eod.id] / d[py.id] : null; }
 }
 
@@ -294,6 +298,7 @@ function tick() {
       L.colSeen[c.id] = L.checkedAt;
     }
     for (const [st, vals] of Object.entries(p.data)) Object.assign(data[st] = data[st] || {}, vals);
+    for (const [st, vals] of Object.entries(p.raw || {})) Object.assign(L.raw[st] = L.raw[st] || {}, vals);
   }
   addDerived(data);
   if (!last || JSON.stringify(last.data) !== JSON.stringify(data)) {
@@ -342,18 +347,43 @@ function pace(st) {
   return { mins: Math.round((now.t - old.t) / 60e3), ds, dp, pct: dp ? (ds - dp) / Math.abs(dp) * 100 : null };
 }
 
+// SPLH goal: from the analyzer's Targets, or set right in the panel (kept in this browser).
+let splhGoal = TGT.splh ?? null;
+try { const g = localStorage.getItem("pwrLive.splhGoal"); if (g) splhGoal = +g; } catch (e) {}
+// SPLH over the last 30 min: new sales ÷ new labor hours. Shows whether staffing right now fits sales right now.
+function splhRecent(st) {
+  const sa = colBy("sales"), hr = colBy("labor_hours"), now = latest(), old = snapAgo(PACE_MIN);
+  if (!sa || !hr || !now || !old) return null;
+  const pick = (s, id) => st == null ? sumCol(s, id) : s.data[st]?.[id];
+  const ds = pick(now, sa.id) - pick(old, sa.id), dh = pick(now, hr.id) - pick(old, hr.id);
+  if (!isFinite(ds) || !isFinite(dh) || dh < 0.25) return null;
+  return { mins: Math.round((now.t - old.t) / 60e3), ds, dh, splh: ds / dh };
+}
+function splhNow(st) {
+  const now = latest(), sp = colBy("splh"); if (!now || !sp) return null;
+  if (st != null) return now.data[st]?.[sp.id] ?? null;
+  const sa = colBy("sales"), hr = colBy("labor_hours");
+  if (sa && hr) { let s = 0, hh = 0; for (const d of Object.values(now.data)) if (d[sa.id] != null && d[hr.id] > 0) { s += d[sa.id]; hh += d[hr.id]; } return hh ? s / hh : null; }
+  const v = Object.values(now.data).map(d => d[sp.id]).filter(x => x != null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+}
+
 function alerts() {
   const out = [], now = latest(); if (!now) return out;
   const stores = Object.keys(now.data);
   const pc = colBy("pcya");
   if (pc) for (const st of stores) { const v = now.data[st][pc.id]; if (v != null && v < 0) out.push({ sev: "bad", text: `${st} is ${Math.abs(v).toFixed(1)}% behind last year so far today.` }); }
+  const slow = [], surge = [];
   for (const st of stores) {
     const p = pace(st);
-    if (p && p.dp > 0 && p.pct != null && p.pct <= -15) out.push({ sev: "warn", text: `${st} slowed down: ${money(p.ds)} in the last ${p.mins} min vs ${money(p.dp)} at this time last year (${p.pct.toFixed(0)}%).` });
-    if (p && p.dp > 0 && p.pct != null && p.pct >= 25) out.push({ sev: "good", text: `${st} is surging: ${money(p.ds)} in the last ${p.mins} min vs ${money(p.dp)} last year (+${p.pct.toFixed(0)}%).` });
+    if (p && p.dp > 0 && p.pct != null && p.pct <= -15) slow.push({ st, p });
+    if (p && p.dp > 0 && p.pct != null && p.pct >= 25) surge.push({ st, p });
   }
+  if (slow.length >= 3) out.push({ sev: "warn", text: `Slower than last year in the last ${slow[0].p.mins} min: ${slow.map(x => `${x.st} ${x.p.pct.toFixed(0)}%`).join(", ")}.` });
+  else for (const { st, p } of slow) out.push({ sev: "warn", text: `${st} slowed down: ${money(p.ds)} in the last ${p.mins} min vs ${money(p.dp)} at this time last year (${p.pct.toFixed(0)}%).` });
+  if (surge.length >= 3) out.push({ sev: "good", text: `Ahead of last year's pace in the last ${surge[0].p.mins} min: ${surge.map(x => `${x.st} +${x.p.pct.toFixed(0)}%`).join(", ")}.` });
+  else for (const { st, p } of surge) out.push({ sev: "good", text: `${st} is surging: ${money(p.ds)} in the last ${p.mins} min vs ${money(p.dp)} last year (+${p.pct.toFixed(0)}%).` });
   for (const c of L.cols) {
-    if (!c.key || !M[c.key]?.dir || TGT[c.key] == null || c.key === "pcya") continue;
+    if (!c.key || !M[c.key]?.dir || TGT[c.key] == null || c.key === "pcya" || c.key === "splh") continue;
     for (const st of stores) { const v = now.data[st][c.id]; if (status(c.key, v) === "bad") out.push({ sev: "bad", text: `${st} ${c.label}: ${fmtCol(c, v)} (goal ${M[c.key].dir === "up" ? "≥" : "≤"} ${fmt(c.key, TGT[c.key], true)}).` }); }
     if (M[c.key].unit === "min") {
       const old = snapAgo(15);
@@ -367,6 +397,19 @@ function alerts() {
   if (watchedFor >= STALE_MIN * 60e3 && othersMoving) for (const st of stores) {
     const t = L.lastChangeAt[st] || L.snaps[0].t;
     if (now.t - t >= STALE_MIN * 60e3) out.push({ sev: "warn", text: `No new numbers from ${st} since ${clock(t)}. The store may not be reporting.` });
+  }
+  if (splhGoal && colBy("splh")) {
+    const low = [], high = [], dayLow = [];
+    for (const st of stores) {
+      const day = splhNow(st), rec = splhRecent(st);
+      if (rec && rec.splh < splhGoal * 0.8) low.push(`${st} ${money(rec.splh)}`);
+      else if (rec && rec.splh > splhGoal * 1.4) high.push(`${st} ${money(rec.splh)}`);
+      if (day != null && day < splhGoal * 0.9) dayLow.push(`${st} ${money(day)}`);
+    }
+    const mins = (splhRecent(null) || {}).mins || PACE_MIN;
+    if (dayLow.length) out.push({ sev: "bad", text: `SPLH today under the ${money(splhGoal)} goal: ${dayLow.join(", ")}.` });
+    if (low.length) out.push({ sev: "warn", text: `More labor on than sales need right now (SPLH last ${mins} min): ${low.join(", ")}.` });
+    if (high.length) out.push({ sev: "warn", text: `Possibly short-handed (SPLH last ${mins} min well above goal; watch service): ${high.join(", ")}.` });
   }
   const rank = { bad: 0, warn: 1, good: 2 };
   return out.sort((a, b) => rank[a.sev] - rank[b.sev]);
@@ -507,6 +550,21 @@ function render() {
   kp.append(h("div", { class: "kpi" }, h("div", { class: "l" }, "Last change seen"), h("div", { class: "v" }, clock(now.t)), h("div", { class: "n" }, ago(now.t))));
   body.append(kp);
 
+  // Live SPLH tracker.
+  const spBox = h("div", null, h("h3", null, "SPLH (sales per labor hour)"));
+  if (colBy("splh")) {
+    const day = splhNow(null), rec = splhRecent(null);
+    const grid = h("div", { class: "kpis" },
+      h("div", { class: "kpi" }, h("div", { class: "l" }, "Today so far"), h("div", { class: "v" }, day != null ? money(day) : "–"),
+        h("div", { class: "n" }, splhGoal && day != null ? h("span", { class: day >= splhGoal ? "up" : "down" }, `${day >= splhGoal ? "▲" : "▼"} ${money(Math.abs(day - splhGoal))} vs goal`) : (colBy("labor_hours") ? `${Math.round(sumCol(now, colBy("labor_hours").id) * 10) / 10} labor hours` : ""))),
+      h("div", { class: "kpi" }, h("div", { class: "l" }, `Last ${rec ? rec.mins : PACE_MIN} min`), h("div", { class: "v" }, rec ? money(rec.splh) : "…"),
+        h("div", { class: "n" }, rec ? `${money(rec.ds)} on ${Math.round(rec.dh * 10) / 10} hours` : (colBy("labor_hours") ? "Appears after 10 min of watching." : "PWR's own SPLH; open the Labor tab for a live 30-min view."))));
+    spBox.append(grid, h("div", { class: "row", style: "margin-top:6px" }, h("label", { class: "muted", for: "splhGoal" }, "Goal $"),
+      h("input", { id: "splhGoal", type: "number", inputmode: "decimal", step: "any", value: splhGoal ?? "", placeholder: "e.g. 85", style: "width:90px;border:1px solid var(--line);border-radius:8px;padding:5px 6px;background:var(--bg);color:var(--ink)",
+        onchange: e => { splhGoal = e.target.value === "" ? null : +e.target.value; try { e.target.value === "" ? localStorage.removeItem("pwrLive.splhGoal") : localStorage.setItem("pwrLive.splhGoal", String(splhGoal)); } catch (x) {} render(); } })));
+  } else spBox.append(h("div", { class: "muted" }, "Open the Real Time Labor tab (or any PWR screen showing labor hours or SPLH). PWR Live adds the hours to today's sales and tracks SPLH live."));
+  body.append(spBox);
+
   // Alerts.
   const al = alerts(); L.alertCount = al.filter(a => a.sev !== "good").length;
   const ab = h("div", null, h("h3", null, "Needs attention"));
@@ -519,9 +577,10 @@ function render() {
   // Store board.
   const cols = [...L.cols];
   const paceCol = sa ? { id: "__pace", label: `Last ${PACE_MIN} min vs LY` } : null;
-  const show = paceCol ? [cols[0], paceCol, ...cols.slice(1)].filter(Boolean) : cols;
+  const splhCol = colBy("splh") && colBy("labor_hours") ? { id: "__splh", label: `SPLH last ${PACE_MIN} min` } : null;
+  const show = [...(paceCol ? [cols[0], paceCol, ...cols.slice(1)] : cols), splhCol].filter(Boolean);
   const stores = Object.keys(now.data);
-  const val = (st, c) => c.id === "__pace" ? (pace(st)?.pct ?? null) : now.data[st][c.id];
+  const val = (st, c) => c.id === "__pace" ? (pace(st)?.pct ?? null) : c.id === "__splh" ? (splhRecent(st)?.splh ?? null) : now.data[st][c.id];
   if (L.sort) stores.sort((a, b) => { const x = val(a, L.sort), y = val(b, L.sort); if (x == null) return 1; if (y == null) return -1; return (x - y) * L.sortDir; });
   else stores.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   const sortBy = id => { if (L.sort === id) L.sortDir *= -1; else { L.sort = id; L.sortDir = -1; } render(); };
@@ -533,8 +592,11 @@ function render() {
       h("td", null, h("span", { class: "dot", style: `background:${colorFor(st)}` }), st),
       show.map(c => {
         if (c.id === "__pace") { if (now.t - (L.lastChangeAt[st] || now.t) >= STALE_MIN * 60e3) return h("td", { class: "warn" }, "no data"); const p = pace(st); return h("td", { class: p && p.pct != null ? (p.pct <= -15 ? "bad" : p.pct >= 0 ? "good" : "") : "" }, p ? (p.pct != null ? `${p.pct >= 0 ? "+" : ""}${p.pct.toFixed(0)}%` : money(p.ds)) : "…"); }
-        const v = now.data[st][c.id], stt = c.key ? (c.key === "pcya" ? (v == null ? null : v >= 0 ? "good" : "bad") : status(c.key, v)) : null;
-        return h("td", { class: stt || "" }, fmtCol(c, v));
+        if (c.id === "__splh") { const s = splhRecent(st); return h("td", { class: s && splhGoal ? (s.splh >= splhGoal ? "good" : s.splh < splhGoal * 0.8 ? "bad" : "warn") : "" }, s ? money(s.splh) : "…"); }
+        const v = now.data[st][c.id];
+        const stt = c.key === "pcya" ? (v == null ? null : v >= 0 ? "good" : "bad") : c.key === "splh" ? (v == null || !splhGoal ? null : v >= splhGoal ? "good" : v >= splhGoal * 0.9 ? "warn" : "bad") : c.key ? status(c.key, v) : null;
+        const shown = !c.derived && L.raw[st] && L.raw[st][c.id] ? L.raw[st][c.id] : fmtCol(c, v);
+        return h("td", { class: stt || "" }, shown);
       })))));
   const sc = h("div", { class: "scroll" }, tbl);
   body.append(h("div", null, h("h3", null, "Stores"), sc));
