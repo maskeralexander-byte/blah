@@ -44,16 +44,25 @@ least reliable streams, and the app makes no attempt to keep them working.
 
 ## Casting to a Roku
 
-Tap the cast icon (top bar, or top-right while watching) to pick a Roku on the same Wi-Fi. The
-Roku plays the stream in its built-in media player, and your phone becomes the remote: changing
-channels in the app changes them on the TV. Uses Roku's External Control Protocol, so no Roku
-app needs to be installed.
+Tap the cast icon (top bar, or top-right while watching) to pick a Roku on the same Wi-Fi. Your
+phone becomes the remote: changing channels in the app changes them on the TV.
+
+Current Rokus can't play a stream URL sent from a phone on their own, so the TV runs a small
+receiver channel (`roku/`) that the app starts and controls over Roku's External Control Protocol.
+It's installed once:
+
+1. On the Roku remote press **Home ×3, Up ×2, Right, Left, Right, Left, Right**, choose
+   **Enable installer and restart**, and set a password.
+2. Cast any channel from the app. It sees the receiver is missing and asks for that password,
+   then installs the receiver itself.
+
+(Manual alternative: open `http://<roku-ip>` in a browser, sign in as `rokudev`, and upload
+`roku-receiver.zip`, which the build outputs to `app/build/generated/roku-assets/`.)
 
 - If no Roku shows up, enter its IP address (on the Roku: Settings → Network → About).
-- If the Roku refuses, set Settings → System → Advanced system settings → Control by mobile apps →
-  Network access to **Default** or **Permissive**.
-- Channels that need custom headers (user agent / referrer) may not load on Roku, which can't
-  send them.
+- If the Roku refuses requests, set Settings → System → Advanced system settings → Control by
+  mobile apps → Network access to **Default** or **Permissive**.
+- Older Rokus that still have the built-in "Play on Roku" player work without the receiver.
 
 ## Building
 

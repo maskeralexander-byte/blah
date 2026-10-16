@@ -208,6 +208,35 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
     private val _castMessage = MutableStateFlow<String?>(null)
     val castMessage: StateFlow<String?> = _castMessage.asStateFlow()
 
+    /** True once a Roku turned out not to have the receiver channel; the UI shows setup steps. */
+    private val _receiverMissing = MutableStateFlow(false)
+    val receiverMissing: StateFlow<Boolean> = _receiverMissing.asStateFlow()
+
+    fun dismissReceiverHelp() { _receiverMissing.value = false }
+
+    private val _installing = MutableStateFlow(false)
+    val installing: StateFlow<Boolean> = _installing.asStateFlow()
+
+    fun installReceiver(password: String) {
+        val device = _castTarget.value ?: return
+        viewModelScope.launch {
+            _installing.value = true
+            _castMessage.value = "Installing the receiver on ${device.name}…"
+            try {
+                caster.installReceiver(device, password)
+                _receiverMissing.value = false
+                _castMessage.value = "Installed. Starting the channel…"
+                kotlinx.coroutines.delay(1_500)
+                sendToRoku()
+            } catch (e: Exception) {
+                _castMessage.value = e.message ?: "Install failed."
+            }
+            _installing.value = false
+        }
+    }
+
+    fun retryCast() = sendToRoku()
+
     fun scanRokus() {
         if (_scanning.value) return
         viewModelScope.launch {
@@ -255,6 +284,7 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
         val device = _castTarget.value ?: return
         val channel = _playing.value?.let { _queue.value.getOrNull(it) } ?: return
         viewModelScope.launch {
+            _receiverMissing.value = false
             _castMessage.value = "Sending ${channel.name} to ${device.name}…"
             _castMessage.value = try {
                 caster.play(device, channel)
@@ -263,6 +293,9 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
                 } else {
                     "Playing on ${device.name}"
                 }
+            } catch (e: RokuCaster.ReceiverMissingException) {
+                _receiverMissing.value = true
+                e.message
             } catch (e: Exception) {
                 "Couldn't reach ${device.name}: ${e.message ?: e.javaClass.simpleName}"
             }

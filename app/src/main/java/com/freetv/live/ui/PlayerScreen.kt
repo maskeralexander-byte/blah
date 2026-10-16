@@ -10,6 +10,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -90,6 +93,7 @@ fun PlayerScreen(vm: TvViewModel, onExit: () -> Unit) {
     val favorites by vm.favorites.collectAsState()
     val castTarget by vm.castTarget.collectAsState()
     val castMessage by vm.castMessage.collectAsState()
+    val receiverMissing by vm.receiverMissing.collectAsState()
     var showCast by remember { mutableStateOf(false) }
     val i = index ?: return
     val channel = queue.getOrNull(i) ?: return
@@ -268,15 +272,22 @@ fun PlayerScreen(vm: TvViewModel, onExit: () -> Unit) {
 
         castTarget?.let { device ->
             Column(
-                Modifier.align(Alignment.Center).padding(32.dp),
+                Modifier.align(Alignment.Center).verticalScroll(rememberScrollState()).padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Icon(Icons.Default.CastConnected, null, tint = Accent, modifier = Modifier.padding(8.dp))
                 Text(channel.name, color = Color.White, style = MaterialTheme.typography.headlineSmall)
                 Text(castMessage ?: "Playing on ${device.name}", color = Color(0xFFBBBBCC),
                     style = MaterialTheme.typography.bodyMedium)
+                if (receiverMissing) {
+                    Spacer(Modifier.padding(6.dp))
+                    ReceiverSetup(vm, Modifier.widthIn(max = 520.dp))
+                }
                 Spacer(Modifier.padding(6.dp))
-                OutlinedButton(onClick = vm::stopCasting) { Text("Stop casting", color = Color.White) }
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedButton(onClick = vm::retryCast) { Text("Try again", color = Color.White) }
+                    OutlinedButton(onClick = vm::stopCasting) { Text("Stop casting", color = Color.White) }
+                }
             }
         }
 

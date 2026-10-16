@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<component name="PlayerScene" extends="Scene">
+    <interface>
+        <!-- Set from main.brs with the ECP parameters: contentId (stream URL), title, format, ua, ref. -->
+        <field id="request" type="assocarray" onChange="onRequest" />
+    </interface>
+
+    <script type="text/brightscript" uri="pkg:/components/PlayerScene.brs" />
+
+    <children>
+        <Rectangle id="background" width="1920" height="1080" color="0x0E0E14FF" />
+        <Video id="video" width="1920" height="1080" enableUI="false" />
+        <Label id="title" translation="[96, 820]" width="1728" font="font:LargeBoldSystemFont" color="0xFFFFFFFF" />
+        <Label id="status" translation="[96, 900]" width="1728" wrap="true" font="font:MediumSystemFont" color="0xBBBBCCFF"
+            text="Waiting for the Free Live TV app on your phone. Pick a channel and tap the cast icon." />
+    </children>
+</component>

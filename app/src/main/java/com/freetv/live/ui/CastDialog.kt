@@ -98,3 +98,35 @@ fun CastDialog(vm: TvViewModel, onDismiss: () -> Unit) {
         dismissButton = { TextButton(onClick = onDismiss) { Text("Close") } },
     )
 }
+
+/** One-time steps to put the receiver channel on a Roku that doesn't have it. */
+@Composable
+fun ReceiverSetup(vm: TvViewModel, modifier: Modifier = Modifier) {
+    val installing by vm.installing.collectAsState()
+    var password by remember { mutableStateOf("") }
+    Surface(modifier, shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("One-time Roku setup", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Your Roku needs the small Free Live TV receiver app. You only do this once.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text("1. On the Roku remote, press: Home ×3, Up ×2, Right, Left, Right, Left, Right.", style = MaterialTheme.typography.bodyMedium)
+            Text("2. Choose \"Enable installer and restart\", agree, and set a password. The Roku restarts.", style = MaterialTheme.typography.bodyMedium)
+            Text("3. Enter that password here and tap Install.", style = MaterialTheme.typography.bodyMedium)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    password, { password = it }, Modifier.weight(1f),
+                    label = { Text("Developer Mode password") }, singleLine = true,
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                )
+                Spacer(Modifier.width(8.dp))
+                androidx.compose.material3.Button(
+                    onClick = { vm.installReceiver(password) },
+                    enabled = password.isNotEmpty() && !installing,
+                ) { Text(if (installing) "Installing…" else "Install") }
+            }
+        }
+    }
+}

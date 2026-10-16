@@ -4,6 +4,13 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// Packages the Roku receiver channel (../roku) into the APK so the app can install it on a Roku.
+val rokuReceiverZip = tasks.register<Zip>("rokuReceiverZip") {
+    from(rootProject.file("roku"))
+    archiveFileName.set("roku-receiver.zip")
+    destinationDirectory.set(layout.buildDirectory.dir("generated/roku-assets"))
+}
+
 android {
     namespace = "com.freetv.live"
     compileSdk = 35
@@ -30,6 +37,7 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+    sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/roku-assets"))
     buildFeatures {
         compose = true
     }
@@ -54,3 +62,5 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
 }
+
+tasks.named("preBuild") { dependsOn(rokuReceiverZip) }
