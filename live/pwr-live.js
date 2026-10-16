@@ -22,7 +22,7 @@ if (window.top === window && !leftFrame) {
   try { sessionStorage.setItem("pwrLive.framed", "1"); } catch (e) {}
   // The old page is being replaced; stop its leftover timers (such as its own auto-refresh)
   // so they don't reload the tab out from under the frame.
-  try { let id = setTimeout(() => {}, 0); while (id > 0) { clearTimeout(id); clearInterval(id); id--; } } catch (e) {}
+  try { let id = setTimeout(() => {}, 0); for (let n = 0; id > 0 && n < 100000; n++, id--) { clearTimeout(id); clearInterval(id); } } catch (e) {}
   const title = document.title, de = document.documentElement;
   de.replaceChildren();
   de.removeAttribute("class");
@@ -54,12 +54,19 @@ function status(key, v) {
 }
 
 /* ---------- Reading the page (read-only) ---------- */
-const ROOT_SEL = '.k-grid,.dx-datagrid,.ag-root-wrapper,.slick-grid,.e-grid,.mat-table,.mat-mdc-table,[role="grid"],[role="treegrid"]';
+// Grid widgets that split one grid into several tables (header, body, frozen columns).
+const WIDGET_SEL = '.ui-jqgrid,.k-grid,.dx-datagrid,.dxgvControl,.ag-root-wrapper,.slick-grid,.e-grid,.mat-table,.mat-mdc-table,.rgMasterTable,.igrid';
+// Div-based grids described only by ARIA roles.
+const ARIA_SEL = '[role="grid"]:not(table),[role="treegrid"]:not(table),[role="table"]:not(table)';
+// Copies of frozen columns that some grids draw on top of the real table.
+const CLONE_SEL = '.frozen-div,.frozen-bdiv,.frozen-sdiv,.dx-datagrid-content-fixed,.k-grid-content-locked-clone';
+const HEADER_AREA = '.ui-jqgrid-hdiv,.dx-datagrid-headers,.k-grid-header,.ag-header,.dxgvHeader';
 const visible = el => el.getClientRects().length > 0;
 const cellText = c => (c.innerText ?? c.textContent ?? "").replace(/\s+/g, " ").trim();
-const inFooter = el => !!el.closest('tfoot,[class*="footer" i]');
-const isHeaderRow = tr => !!tr.closest("thead") || (tr.cells.length > 0 && [...tr.cells].every(c => c.tagName === "TH"));
-const skipRow = tr => inFooter(tr) || /group|footer|aggregate|total|summary/i.test(tr.className || "");
+const inFooter = el => !!el.closest('tfoot,[class*="footer" i],.ui-jqgrid-sdiv');
+const isHeaderRow = tr => !!tr.closest("thead") || !!tr.closest(HEADER_AREA) || /\b(ui-jqgrid-labels|dx-header-row|dxgvHeader)\b/.test(tr.className || "") ||
+  (tr.cells.length > 0 && [...tr.cells].every(c => c.tagName === "TH" || c.getAttribute("role") === "columnheader"));
+const skipRow = tr => inFooter(tr) || /group|foot|aggregate|total|summary|jqgfirstrow|freespace|virtual-row/i.test(tr.className || "") || ![...tr.cells].some(c => cellText(c));
 function rowCells(tr) { const out = []; for (const c of tr.cells) { out.push(cellText(c)); for (let i = 1; i < (c.colSpan || 1); i++) out.push(""); } return out; }
 
 // Header rows (with colspans/rowspans) -> one label per column.
@@ -82,7 +89,7 @@ function headerLabels(trs) {
 function fromTables(tables) {
   const heads = [], bodies = [];
   for (const t of tables) {
-    if (inFooter(t)) continue;
+    if (inFooter(t) || t.closest(CLONE_SEL) || /_frozen$/.test(t.id || "")) continue;
     const rows = [...t.rows].filter(tr => tr.closest("table") === t);
     const hr = rows.filter(isHeaderRow), br = rows.filter(tr => !isHeaderRow(tr) && !skipRow(tr));
     if (hr.length) heads.push(headerLabels(hr));
@@ -125,41 +132,68 @@ function docs() {
 }
 
 function scan() {
-  const found = [];
+  const found = []; // raw grids, parsed below
   for (const d of docs()) {
-    for (const r of d.querySelectorAll(ROOT_SEL)) {
-      if (!visible(r) || (r.parentElement && r.parentElement.closest(ROOT_SEL))) continue;
+    for (const r of d.querySelectorAll(WIDGET_SEL)) {
+      if (!visible(r) || (r.parentElement && r.parentElement.closest(WIDGET_SEL))) continue;
       const tables = [...r.querySelectorAll("table")].filter(t => visible(t) && !(t.parentElement.closest("table") && r.contains(t.parentElement.closest("table"))));
       const grid = tables.length ? fromTables(tables) : fromAria(r);
       if (grid && grid.length > 1) found.push(grid);
     }
+    for (const r of d.querySelectorAll(ARIA_SEL)) {
+      if (!visible(r) || r.closest(WIDGET_SEL) || (r.parentElement && r.parentElement.closest(ARIA_SEL))) continue;
+      const grid = fromAria(r);
+      if (grid && grid.length > 1) found.push(grid);
+    }
     // Plain tables outside known grid widgets. A header-only table directly followed by a
     // body-only table is treated as one grid.
-    const plain = [...d.querySelectorAll("table")].filter(t => visible(t) && !t.closest(ROOT_SEL) && !t.parentElement.closest("table"));
+    const plain = [...d.querySelectorAll("table")].filter(t => visible(t) && !t.closest(WIDGET_SEL) && !t.closest(ARIA_SEL) && !t.closest(CLONE_SEL) && !t.parentElement.closest("table"));
     for (let i = 0; i < plain.length; i++) {
-      const t = plain[i], rows = [...t.rows];
+      const t = plain[i], rows = [...t.rows].filter(tr => !skipRow(tr) || isHeaderRow(tr));
       const headOnly = rows.length && rows.every(isHeaderRow), next = plain[i + 1];
       if (headOnly && next && ![...next.rows].some(isHeaderRow)) { const g = fromTables([t, next]); if (g && g.length > 1) found.push(g); i++; continue; }
       const g = fromTables([t]); if (g && g.length > 1) found.push(g);
     }
   }
-  return found.map(grid => ({ grid, parsed: parseGrid(grid) })).filter(x => x.parsed.cols.length && Object.keys(x.parsed.data).length);
+  const parsed = found.map(parseGrid).filter(p => p.cols.length && Object.keys(p.data).length);
+  if (!parsed.length) for (const d of docs()) { const p = readTiles(d); if (p) parsed.push(p); }
+  return parsed;
 }
 
-const ID_RE = /^\d{3,6}$/;
+// What the page holds, for when no report table is found. Frames from another site can't be read.
+function pageInfo() {
+  const info = { tables: 0, grids: 0, frames: 0, blocked: [] };
+  for (const d of docs()) {
+    info.tables += [...d.querySelectorAll("table")].filter(visible).length;
+    info.grids += [...d.querySelectorAll(WIDGET_SEL + "," + ARIA_SEL)].filter(visible).length;
+    for (const f of d.querySelectorAll("iframe,frame")) {
+      if (f === frame || !visible(f)) continue;
+      info.frames++;
+      let readable = false;
+      try { readable = !!(f.contentDocument && f.contentDocument.documentElement); } catch (e) {}
+      const box = f.getBoundingClientRect();
+      if (!readable && f.src && /^https?:/.test(f.src) && box.width * box.height > 20000) { const r = box; info.blocked.push({ src: f.src, host: new URL(f.src).host, area: r.width * r.height }); }
+    }
+  }
+  info.blocked.sort((a, b) => b.area - a.area);
+  return info;
+}
+
+const storeId = v => { const m = String(v || "").trim().match(/^#?(\d{3,6})\b/); return m ? m[1] : null; };
 function parseGrid(grid) {
   const hr = findHeaderRow(grid);
   const headers = grid[hr].map((h, i) => String(h || "").trim() || `Column ${i + 1}`);
   const rows = grid.slice(hr + 1).filter(r => r.filter(c => String(c).trim() !== "").length > 1);
   const map = autoMap(headers);
   let si = map.store;
-  const idShare = j => rows.length ? rows.filter(r => ID_RE.test(String(r[j] || "").trim())).length / rows.length : 0;
+  const idShare = j => rows.length ? rows.filter(r => storeId(r[j])).length / rows.length : 0;
   if (si < 0) si = headers.findIndex((_, j) => idShare(j) >= 0.6);
   const idLike = si >= 0 && idShare(si) >= 0.6;
   const recs = {};
   for (const r of rows) {
-    const st = si >= 0 ? String(r[si] || "").trim() : "This store";
-    if (!st || (idLike && !ID_RE.test(st)) || /^(grand\s*)?totals?\b|^group\b/i.test(st)) continue;
+    const raw = si >= 0 ? String(r[si] || "").trim() : "This store";
+    const st = idLike ? storeId(raw) : raw;
+    if (!st || /^(grand\s*)?totals?\b|^group\b/i.test(st)) continue;
     recs[st] = r;
   }
   const keyOf = j => Object.keys(map).find(k => map[k] === j && M[k]) || null;
@@ -171,22 +205,62 @@ function parseGrid(grid) {
   });
   const data = {};
   for (const [st, r] of Object.entries(recs)) { data[st] = {}; for (const c of cols) data[st][c.id] = parseNumber(r[c.j]); }
-  // Derived: year-over-year % and projected end of day from last year's shape of the day.
-  const byKey = k => cols.find(c => c.key === k);
-  const sa = byKey("sales"), py = byKey("py_sales"), eod = byKey("py_eod");
-  if (sa && py && !byKey("pcya")) { cols.push({ id: "PCYA (calc)", label: "vs last year", key: "pcya", derived: true }); for (const d of Object.values(data)) d["PCYA (calc)"] = d[sa.id] != null && d[py.id] ? (d[sa.id] - d[py.id]) / d[py.id] * 100 : null; }
-  if (sa && py && eod) { cols.push({ id: "Projected EOD", label: "Projected EOD", key: "proj_eod", derived: true }); for (const d of Object.values(data)) d["Projected EOD"] = d[sa.id] != null && d[py.id] && d[eod.id] != null ? d[sa.id] * d[eod.id] / d[py.id] : null; }
-  return { headers, cols, data, sig: headers.join("|") };
+  return { headers, cols, data };
+}
+
+// Tile dashboards (like Service & Labor Summary): pair each number with the label just above it
+// in the same small card.
+const VALUE_RE = /^[↑↓▲▼⬆⬇+-]?\s*\(?-?\$?\d[\d,]*(\.\d+)?\s*%?\)?$/;
+function readTiles(d) {
+  if (!d.body) return null;
+  const skip = "table,svg,canvas,script,style,select,option,noscript,[data-pwr-live]," + WIDGET_SEL + "," + ARIA_SEL;
+  const items = [];
+  for (const el of d.body.querySelectorAll("*")) {
+    if ([...el.children].some(c => (c.textContent || "").trim())) continue; // not a text leaf
+    const text = cellText(el);
+    if (!text || text.length > 40 || !visible(el) || el.closest(skip)) continue;
+    items.push({ el, text });
+  }
+  const labels = [], vals = [];
+  items.forEach((x, i) => {
+    if (!VALUE_RE.test(x.text)) return;
+    for (let k = i - 1; k >= Math.max(0, i - 4); k--) {
+      const y = items[k];
+      if (VALUE_RE.test(y.text) || y.text.length < 2) continue;
+      let anc = x.el.parentElement, depth = 0;
+      while (anc && !anc.contains(y.el) && depth < 5) { anc = anc.parentElement; depth++; }
+      if (!anc || !anc.contains(y.el) || cellText(anc).length > 160) break;
+      if (!labels.includes(y.text)) { labels.push(y.text); vals.push(x.text); }
+      break;
+    }
+  });
+  if (labels.length < 2) return null;
+  let st = "This store";
+  for (const x of items) { const m = x.text.match(/^store[\s#:-]*(\d{3,6})$/i); if (m) { st = m[1]; break; } }
+  const map = autoMap(labels);
+  const keyOf = j => Object.keys(map).find(k => map[k] === j && M[k]) || null;
+  const cols = labels.map((label, j) => ({ id: label, label, key: keyOf(j) }));
+  const data = { [st]: Object.fromEntries(labels.map((l, j) => [l, parseNumber(vals[j])])) };
+  return { headers: labels, cols, data };
 }
 
 /* ---------- Session history ---------- */
 const KEY = "pwrLive.v1";
-const L = { snaps: [], cols: [], checkedAt: null, lastChangeAt: {}, pick: 0, interval: 15, sort: null, sortDir: -1, metric: null, mini: false, err: "" };
+const L = { snaps: [], cols: [], colSeen: {}, checkedAt: null, lastChangeAt: {}, interval: 15, sort: null, sortDir: -1, metric: null, mini: false, err: "" };
 try {
   const saved = JSON.parse(sessionStorage.getItem(KEY) || "null");
-  if (saved && saved.path === location.pathname && Date.now() - saved.snaps[saved.snaps.length - 1].t < 2 * 3600e3) Object.assign(L, { snaps: saved.snaps, cols: saved.cols, lastChangeAt: saved.lastChangeAt || {} });
+  if (saved && saved.snaps && saved.snaps.length && Date.now() - saved.snaps[saved.snaps.length - 1].t < 2 * 3600e3) Object.assign(L, { snaps: saved.snaps, cols: saved.cols || [], colSeen: saved.colSeen || {}, lastChangeAt: saved.lastChangeAt || {} });
 } catch (e) { /* storage blocked: history lasts until the page reloads */ }
-const save = () => { try { sessionStorage.setItem(KEY, JSON.stringify({ path: location.pathname, snaps: L.snaps.slice(-720), cols: L.cols, lastChangeAt: L.lastChangeAt })); } catch (e) {} };
+const save = () => { try { sessionStorage.setItem(KEY, JSON.stringify({ snaps: L.snaps.slice(-720), cols: L.cols, colSeen: L.colSeen, lastChangeAt: L.lastChangeAt })); } catch (e) {} };
+
+// Year-over-year % and projected end of day (today × last year's full day ÷ last year so far).
+function addDerived(data) {
+  const byKey = k => L.cols.find(c => c.key === k && !c.derived);
+  const sa = byKey("sales"), py = byKey("py_sales"), eod = byKey("py_eod");
+  const addCol = (id, label, key) => { if (!L.cols.some(c => c.id === id)) L.cols.push({ id, label, key, derived: true }); };
+  if (sa && py && !byKey("pcya")) { addCol("PCYA (calc)", "vs last year", "pcya"); for (const d of Object.values(data)) d["PCYA (calc)"] = d[sa.id] != null && d[py.id] ? (d[sa.id] - d[py.id]) / d[py.id] * 100 : null; }
+  if (sa && py && eod) { addCol("Projected EOD", "Projected EOD", "proj_eod"); for (const d of Object.values(data)) d["Projected EOD"] = d[sa.id] != null && d[py.id] && d[eod.id] != null ? d[sa.id] * d[eod.id] / d[py.id] : null; }
+}
 
 function tick() {
   let found;
@@ -198,21 +272,33 @@ function tick() {
     if (signIn) {
       L.err = "Sign in to PWR. The panel stays open and starts reading once you're on Real Time Sales.";
       if (!L.mini) { L.autoMini = true; api.minimize(); }
-    } else L.err = frame ? "No report table on this screen yet. Open Real Time Sales (or another PWR report with a table)." : "No report table found on this page. Open Real Time Sales (or another PWR report with a table) and tap PWR Live again.";
+    } else {
+      const info = pageInfo();
+      L.info = info;
+      L.err = info.blocked.length
+        ? `The report is in a section of the page that comes from ${info.blocked[0].host}, which PWR Live isn't allowed to read from here. Tap Open report to load that section by itself, then tap PWR Live again.`
+        : frame ? "No report table on this screen yet. Open Real Time Sales (or another PWR report with a table)." : "No report table found on this page. Open Real Time Sales (or another PWR report with a table) and tap PWR Live again.";
+    }
     render(); return;
   }
-  L.err = "";
+  L.err = ""; L.info = null;
   if (L.autoMini) { L.autoMini = false; api.show(); return; }
-  const best = found.map((f, i) => ({ i, s: f.parsed.cols.filter(c => c.key).length * 10 + Object.keys(f.parsed.data).length })).sort((a, b) => b.s - a.s);
-  const pick = found[L.pick] ? L.pick : best[0].i;
-  L.pick = pick;
-  const p = found[pick].parsed;
-  if (L.sig && L.sig !== p.sig) { L.snaps = []; L.lastChangeAt = {}; }
-  L.sig = p.sig; L.cols = p.cols.map(({ id, label, key, derived }) => ({ id, label, key, derived }));
+  // Merge everything on this screen into the running board, so each PWR tab you visit adds
+  // its columns (Sales, Labor, Service summary...) to the same stores.
   const last = L.snaps[L.snaps.length - 1];
-  if (!last || JSON.stringify(last.data) !== JSON.stringify(p.data)) {
-    for (const st of Object.keys(p.data)) if (!last || JSON.stringify(last.data[st]) !== JSON.stringify(p.data[st])) L.lastChangeAt[st] = L.checkedAt;
-    L.snaps.push({ t: L.checkedAt, data: p.data });
+  const data = JSON.parse(JSON.stringify(last ? last.data : {}));
+  for (const p of found) {
+    for (const c of p.cols) {
+      const have = L.cols.find(x => x.id === c.id);
+      if (!have) L.cols.push({ id: c.id, label: c.label, key: c.key && !L.cols.some(x => x.key === c.key && !x.derived) ? c.key : null });
+      L.colSeen[c.id] = L.checkedAt;
+    }
+    for (const [st, vals] of Object.entries(p.data)) Object.assign(data[st] = data[st] || {}, vals);
+  }
+  addDerived(data);
+  if (!last || JSON.stringify(last.data) !== JSON.stringify(data)) {
+    for (const st of Object.keys(data)) if (!last || JSON.stringify(last.data[st]) !== JSON.stringify(data[st])) L.lastChangeAt[st] = L.checkedAt;
+    L.snaps.push({ t: L.checkedAt, data });
     if (L.snaps.length > 720) L.snaps.splice(0, L.snaps.length - 720);
     save();
   }
@@ -393,6 +479,12 @@ function render() {
       [5, 15, 30, 60].map(n => h("option", { value: n, selected: n === L.interval ? "" : null }, n < 60 ? `${n} sec` : "1 min")))));
 
   if (L.err) body.append(h("div", { class: "al warn" }, L.err));
+  if (L.err && L.info) {
+    const i = L.info;
+    if (i.blocked.length) body.append(h("div", { class: "row" }, h("button", { class: "btn", type: "button", onclick: () => { try { sessionStorage.removeItem("pwrLive.framed"); } catch (e) {} location.href = i.blocked[0].src; } }, "Open report")));
+    body.append(h("div", { class: "muted" }, `What PWR Live sees: ${i.tables} table${i.tables === 1 ? "" : "s"}, ${i.grids} grid${i.grids === 1 ? "" : "s"}, ${i.frames} embedded section${i.frames === 1 ? "" : "s"}` +
+      (i.blocked.length ? ` (${i.blocked.length} unreadable: ${[...new Set(i.blocked.map(b => b.host))].join(", ")})` : "") + ". If the report is on screen and this still shows nothing, send a screenshot of this panel."));
+  }
   if (!now) return;
 
   // Headline numbers for the whole group on screen.
@@ -435,7 +527,8 @@ function render() {
   const sortBy = id => { if (L.sort === id) L.sortDir *= -1; else { L.sort = id; L.sortDir = -1; } render(); };
   const tbl = h("table", null,
     h("thead", null, h("tr", null, h("th", { tabindex: "0", onclick: () => { L.sort = null; render(); } }, "Store"),
-      show.map(c => h("th", { tabindex: "0", onclick: () => sortBy(c.id), onkeydown: e => { if (e.key === "Enter") sortBy(c.id); } }, c.label + (L.sort === c.id ? (L.sortDir > 0 ? " ↑" : " ↓") : ""))))),
+      show.map(c => { const age = !c.derived && L.colSeen[c.id] ? Math.round((L.checkedAt - L.colSeen[c.id]) / 60e3) : 0;
+        return h("th", { tabindex: "0", title: age ? `From another PWR tab, last seen ${age} min ago` : null, onclick: () => sortBy(c.id), onkeydown: e => { if (e.key === "Enter") sortBy(c.id); } }, c.label + (age >= 2 ? ` · ${age}m ago` : "") + (L.sort === c.id ? (L.sortDir > 0 ? " ↑" : " ↓") : "")); }))),
     h("tbody", null, stores.map(st => h("tr", null,
       h("td", null, h("span", { class: "dot", style: `background:${colorFor(st)}` }), st),
       show.map(c => {
@@ -455,12 +548,10 @@ function render() {
   // Tools.
   const tools = h("div", { class: "row" },
     h("button", { class: "btn", type: "button", onclick: copyTable }, "Copy table for the analyzer"),
-    L.found && L.found.length > 1 ? h("select", { "aria-label": "Table on this page", onchange: e => { L.pick = +e.target.value; tick(); } },
-      L.found.map((f, i) => h("option", { value: i, selected: i === L.pick ? "" : null }, `Table ${i + 1}: ${f.parsed.headers.slice(0, 3).join(", ")}`))) : null,
-    h("button", { class: "btn", type: "button", onclick: () => { L.snaps = []; L.lastChangeAt = {}; save(); tick(); } }, "Restart history"));
+    h("button", { class: "btn", type: "button", onclick: () => { L.snaps = []; L.cols = []; L.colSeen = {}; L.lastChangeAt = {}; save(); tick(); } }, "Restart history"));
   body.append(tools);
   if (L.copied) body.append(h("div", { class: "muted" }, L.copied));
-  body.append(h("div", { class: "muted" }, "Numbers update when the PWR page updates. If the table isn't refreshing on its own, tap the page's refresh button; this panel picks up the new numbers."));
+  body.append(h("div", { class: "muted" }, "Numbers update when the PWR page updates. Visit other PWR tabs (Labor, Service & Labor Summary…) and their numbers are added to the board. Columns from a tab you're not on show how long ago they were read."));
   body.scrollTop = keepScroll; sc.scrollLeft = keepX;
 }
 

@@ -37,6 +37,8 @@ What it shows, refreshed every 5 to 60 seconds:
 - **Last 30 min vs last year**, for the group and for each store, so you can see who is slowing down right now.
 - **Needs attention**: stores behind last year, stores whose last-30-minute pace is 15%+ under last year, metrics past your targets (for example ADT), times rising fast, and stores that stopped reporting for 20+ minutes.
 - A **store table** you can sort by tapping a column, and a **chart** of any column since you started watching.
+- **Every PWR tab you visit adds to the board.** It reads tables (Real Time Sales, Real Time Labor, …) and tile screens (Service & Labor Summary: sales, PCYA, order count, Average Load, cDOT %, extreme deliveries, …) and merges them by store. Columns from a tab you're not on show how long ago they were read.
+- If the report sits in an embedded section from another address that the browser won't let it read, the panel says so and offers **Open report** to load that section by itself.
 - **Copy table for the analyzer** copies the current table so you can paste it into the full analyzer.
 
 **It stays open while you use PWR.** Tap it on any PWR page, even the sign-in page. The tab then shows PWR in a full-screen frame under the panel, so signing in, switching reports and page reloads don't close it. PWR keeps full control of its own pages: if one ever leaves the frame, it loads normally and the next tap opens the panel on that page instead.
