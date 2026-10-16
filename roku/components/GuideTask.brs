@@ -44,7 +44,8 @@ sub build()
     for each i in order
         ch = channels[i]
         row = root.CreateChild("ContentNode")
-        row.title = (i + 1).ToStr() + "  " + textOf(ch.name)
+        row.title = textOf(ch.name)
+        row.AddFields({ number: (i + 1).ToStr() })
         if ch.logo <> invalid then row.HDSMALLICONURL = ch.logo
 
         added = 0

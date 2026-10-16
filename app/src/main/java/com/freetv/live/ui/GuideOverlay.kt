@@ -43,6 +43,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.freetv.live.data.Programme
 import kotlinx.coroutines.delay
 
@@ -80,10 +81,10 @@ fun ChannelListOverlay(vm: TvViewModel, onClose: () -> Unit, modifier: Modifier 
     val focusCurrent = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { focusCurrent.requestFocus() } }
 
-    Surface(modifier.fillMaxHeight().widthIn(max = 460.dp), color = Color(0xF20E0E14)) {
+    Surface(modifier.fillMaxHeight().widthIn(max = 460.dp), color = Night.copy(alpha = 0.95f)) {
         Column {
             Row(Modifier.fillMaxWidth().padding(start = 20.dp, top = 12.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Channels", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                GuideClock(Modifier.weight(1f), timeSize = 26.sp)
                 IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Close") }
             }
             LazyColumn(state = listState) {
@@ -107,7 +108,8 @@ fun ChannelListOverlay(vm: TvViewModel, onClose: () -> Unit, modifier: Modifier 
                             .then(if (i == current) Modifier.focusRequester(focusCurrent) else Modifier),
                     ) {
                         Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("${i + 1}", Modifier.width(44.dp), color = if (i == current) Accent else MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("${i + 1}", Modifier.width(48.dp), style = numberStyle(15.sp),
+                                color = if (i == current) Cyan else Violet)
                             ChannelLogo(c, 40.dp)
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
@@ -116,12 +118,7 @@ fun ChannelListOverlay(vm: TvViewModel, onClose: () -> Unit, modifier: Modifier 
                                     Text(nowShow.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
                                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     Spacer(Modifier.height(3.dp))
-                                    LinearProgressIndicator(
-                                        progress = { progressOf(nowShow, now) },
-                                        modifier = Modifier.fillMaxWidth().height(3.dp),
-                                        color = Accent,
-                                        trackColor = Color(0x33FFFFFF),
-                                    )
+                                    NeonProgress(progressOf(nowShow, now), Modifier.fillMaxWidth())
                                 }
                             }
                         }

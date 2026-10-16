@@ -131,7 +131,7 @@ fun ReceiverSetup(vm: TvViewModel, modifier: Modifier = Modifier) {
             } else {
                 Text("One-time Roku setup", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "Your Roku needs the small Free Live TV receiver app. You only do this once.",
+                    "Your Roku needs the small Live TV receiver app. You only do this once.",
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Text("1. On the Roku remote, press: Home ×3, Up ×2, Right, Left, Right, Left, Right.", style = MaterialTheme.typography.bodyMedium)

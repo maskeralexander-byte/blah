@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- Channel column cell in the guide grid: channel number plus a logo sized to fit (or the name). -->
+<component name="ChannelCell" extends="Group">
+    <interface>
+        <field id="content" type="node" onChange="layout" />
+        <field id="width" type="float" onChange="layout" />
+        <field id="height" type="float" onChange="layout" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/ChannelCell.brs" />
+    <children>
+        <Label id="number" translation="[14, 0]" width="64" vertAlign="center" color="0x9B7BFFFF">
+            <Font role="font" uri="pkg:/fonts/Bungee-Regular.ttf" size="24" />
+        </Label>
+        <Poster id="logo" loadDisplayMode="scaleToFit" />
+        <Label id="name" wrap="true" maxLines="2" vertAlign="center" color="0xEDEBFFFF">
+            <Font role="font" uri="pkg:/fonts/Poppins-SemiBold.ttf" size="19" />
+        </Label>
+    </children>
+</component>

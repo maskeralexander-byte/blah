@@ -13,6 +13,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.TabRowDefaults
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -71,7 +77,7 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun BrowseScreen(vm: TvViewModel, onOpenSources: () -> Unit) {
-    BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    BoxWithConstraints(Modifier.fillMaxSize().nightBackground()) {
         if (maxWidth >= 720.dp) {
             Row(Modifier.fillMaxSize()) {
                 SectionPane(vm, Modifier.width(280.dp).fillMaxHeight(), onPicked = {})
@@ -102,13 +108,9 @@ private fun SectionPane(vm: TvViewModel, modifier: Modifier, onPicked: () -> Uni
     val groups by vm.groups.collectAsState()
     val countries by vm.countries.collectAsState()
 
-    LazyColumn(modifier.background(MaterialTheme.colorScheme.surface).padding(vertical = 12.dp)) {
+    LazyColumn(modifier.background(Night.copy(alpha = 0.72f)).padding(vertical = 12.dp)) {
         item {
-            Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Tv, null, tint = Accent)
-                Spacer(Modifier.width(8.dp))
-                Text("Free Live TV", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            }
+            GuideClock(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 16.dp), timeSize = 34.sp)
         }
         item { SectionItem("All channels", channels.size, current == Section.All) { vm.selectSection(Section.All); onPicked() } }
         item { SectionItem("Favorites", favorites.size, current == Section.Favorites) { vm.selectSection(Section.Favorites); onPicked() } }
@@ -143,8 +145,8 @@ private fun SectionItem(label: String, count: Int?, selected: Boolean, onClick: 
         interactionSource = interaction,
         shape = RoundedCornerShape(10.dp),
         color = when {
-            focused -> Accent
-            selected -> MaterialTheme.colorScheme.surfaceVariant
+            focused -> Violet
+            selected -> Violet.copy(alpha = 0.2f)
             else -> Color.Transparent
         },
         modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 1.dp),
@@ -172,54 +174,102 @@ private fun ChannelPane(vm: TvViewModel, onMenu: (() -> Unit)?, onOpenSources: (
     val now by rememberNow()
 
     Column(Modifier.fillMaxSize()) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (onMenu != null) IconButton(onClick = onMenu) { Icon(Icons.Default.Menu, "Sections") }
-            OutlinedTextField(
-                value = query,
-                onValueChange = vm::setQuery,
-                modifier = Modifier.weight(1f),
-                singleLine = true,
-                placeholder = { Text("Search channels") },
-                leadingIcon = { Icon(Icons.Default.Search, null) },
-                trailingIcon = {
-                    if (query.isNotEmpty()) IconButton(onClick = { vm.setQuery("") }) { Icon(Icons.Default.Clear, "Clear") }
-                },
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                shape = RoundedCornerShape(12.dp),
-            )
-            val castTarget by vm.castTarget.collectAsState()
-            var showCast by remember { mutableStateOf(false) }
+        val castTarget by vm.castTarget.collectAsState()
+        var showCast by remember { mutableStateOf(false) }
+        if (showCast) CastDialog(vm, onDismiss = { showCast = false })
+        val actions: @Composable () -> Unit = {
             IconButton(onClick = { showCast = true }) {
                 Icon(
                     if (castTarget != null) Icons.Default.CastConnected else Icons.Default.Cast,
                     "Cast to Roku",
-                    tint = if (castTarget != null) Accent else LocalContentColor.current,
+                    tint = if (castTarget != null) Cyan else LocalContentColor.current,
                 )
             }
-            if (showCast) CastDialog(vm, onDismiss = { showCast = false })
             IconButton(onClick = { vm.refresh(force = true) }) { Icon(Icons.Default.Refresh, "Refresh") }
             IconButton(onClick = onOpenSources) { Icon(Icons.Default.Settings, "Sources") }
         }
+        val search: @Composable (Modifier) -> Unit = { m ->
+            OutlinedTextField(
+                value = query,
+                onValueChange = vm::setQuery,
+                modifier = m,
+                singleLine = true,
+                placeholder = { Text("Search channels") },
+                leadingIcon = { Icon(Icons.Default.Search, null, tint = Violet) },
+                trailingIcon = {
+                    if (query.isNotEmpty()) IconButton(onClick = { vm.setQuery("") }) { Icon(Icons.Default.Clear, "Clear") }
+                },
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                shape = RoundedCornerShape(28.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = Violet,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                    focusedContainerColor = Night.copy(alpha = 0.5f),
+                    unfocusedContainerColor = Night.copy(alpha = 0.5f),
+                ),
+            )
+        }
+        if (onMenu != null) {
+            Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onMenu) { Icon(Icons.Default.Menu, "Sections") }
+                Text("Live TV", style = MaterialTheme.typography.titleLarge)
+                Spacer(Modifier.weight(1f))
+                actions()
+            }
+            search(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp))
+        } else {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                search(Modifier.weight(1f))
+                actions()
+            }
+        }
         val tab by vm.tab.collectAsState()
-        TabRow(selectedTabIndex = tab.ordinal, containerColor = MaterialTheme.colorScheme.background) {
+        TabRow(
+            selectedTabIndex = tab.ordinal,
+            containerColor = Color.Transparent,
+            indicator = { positions ->
+                Box(
+                    with(TabRowDefaults) { Modifier.tabIndicatorOffset(positions[tab.ordinal]) }
+                        .padding(horizontal = 24.dp)
+                        .height(3.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(NeonBrush)
+                )
+            },
+            divider = {},
+        ) {
             LanguageTab.entries.forEach { t ->
-                Tab(selected = tab == t, onClick = { vm.selectTab(t) }, text = { Text(t.label) })
+                Tab(
+                    selected = tab == t,
+                    onClick = { vm.selectTab(t) },
+                    text = { Text(t.label, fontWeight = if (tab == t) FontWeight.SemiBold else FontWeight.Normal) },
+                    selectedContentColor = Color.White,
+                    unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
         val officialOnly by vm.officialOnly.collectAsState()
         Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            val chipColors = FilterChipDefaults.filterChipColors(
+                selectedContainerColor = Violet.copy(alpha = 0.22f),
+                selectedLabelColor = Color.White,
+            )
             FilterChip(
                 selected = officialOnly,
                 onClick = { vm.setOfficialOnly(true) },
                 label = { Text("Official channels") },
+                colors = chipColors,
+                shape = RoundedCornerShape(50),
             )
             FilterChip(
                 selected = !officialOnly,
                 onClick = { vm.setOfficialOnly(false) },
                 label = { Text("All streams") },
+                colors = chipColors,
+                shape = RoundedCornerShape(50),
             )
         }
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -251,7 +301,8 @@ private fun ChannelPane(vm: TvViewModel, onMenu: (() -> Unit)?, onOpenSources: (
                     ChannelRow(
                         number = i + 1,
                         channel = c,
-                        nowTitle = guide.nowAndNext(c, now).first?.title,
+                        nowShow = guide.nowAndNext(c, now).first,
+                        now = now,
                         favorite = c.url in favorites,
                         onPlay = { vm.play(list, i) },
                         onFavorite = { vm.toggleFavorite(c) },
@@ -263,35 +314,53 @@ private fun ChannelPane(vm: TvViewModel, onMenu: (() -> Unit)?, onOpenSources: (
 }
 
 @Composable
-private fun ChannelRow(number: Int, channel: Channel, nowTitle: String?, favorite: Boolean, onPlay: () -> Unit, onFavorite: () -> Unit) {
+private fun ChannelRow(
+    number: Int,
+    channel: Channel,
+    nowShow: com.freetv.live.data.Programme?,
+    now: Long,
+    favorite: Boolean,
+    onPlay: () -> Unit,
+    onFavorite: () -> Unit,
+) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Surface(
             onClick = onPlay,
             interactionSource = interaction,
-            shape = RoundedCornerShape(12.dp),
-            color = if (focused) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent,
+            shape = RoundedCornerShape(16.dp),
+            color = if (focused) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface.copy(alpha = 0.45f),
             modifier = Modifier
                 .weight(1f)
-                .then(if (focused) Modifier.border(2.dp, Accent, RoundedCornerShape(12.dp)) else Modifier),
+                .then(if (focused) Modifier.border(2.dp, NeonBrush, RoundedCornerShape(16.dp)) else Modifier),
         ) {
-            Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     "$number",
-                    Modifier.width(52.dp),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    Modifier.width(56.dp),
+                    style = numberStyle(18.sp),
+                    color = if (focused) Cyan else Violet,
                 )
                 ChannelLogo(channel, 56.dp)
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
                     Text(channel.name, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.titleMedium)
-                    val sub = nowTitle?.let { "Now: $it" }
-                        ?: listOfNotNull(channel.group, channel.country?.let(TvViewModel::countryName)).joinToString(" · ")
-                    Text(sub, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (nowShow != null) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.size(6.dp).clip(CircleShape).background(Pink))
+                            Spacer(Modifier.width(6.dp))
+                            Text(nowShow.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Spacer(Modifier.height(5.dp))
+                        NeonProgress(progressOf(nowShow, now), Modifier.fillMaxWidth(0.85f))
+                    } else {
+                        val sub = listOfNotNull(channel.group, channel.country?.let(TvViewModel::countryName)).joinToString(" · ")
+                        Text(sub, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             }
         }
@@ -309,7 +378,7 @@ private fun ChannelRow(number: Int, channel: Channel, nowTitle: String?, favorit
 fun ChannelLogo(channel: Channel, size: androidx.compose.ui.unit.Dp) {
     var failed by remember(channel.logo) { mutableStateOf(channel.logo == null) }
     Box(
-        Modifier.size(size).clip(RoundedCornerShape(8.dp)).background(Color(0xFF2A2A38)),
+        Modifier.size(size).clip(RoundedCornerShape(12.dp)).background(Color(0xFF1E1B3A)),
         contentAlignment = Alignment.Center,
     ) {
         if (failed) {

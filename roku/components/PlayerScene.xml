@@ -8,66 +8,118 @@
     <script type="text/brightscript" uri="pkg:/components/PlayerScene.brs" />
 
     <children>
-        <Rectangle id="background" width="1920" height="1080" color="0x0E0E14FF" />
+        <Poster id="background" width="1920" height="1080" uri="pkg:/images/bg.png" />
         <Video id="video" width="1920" height="1080" enableUI="false" />
 
-        <!-- Shown while loading or when a channel fails. -->
-        <Label id="title" translation="[96, 440]" width="1728" horizAlign="center" font="font:LargeBoldSystemFont" color="0xFFFFFFFF" />
-        <Label id="status" translation="[96, 520]" width="1728" horizAlign="center" wrap="true" font="font:MediumSystemFont" color="0xBBBBCCFF"
-            text="Open Free Live TV on your phone, pick a channel and tap the cast icon." />
+        <!-- Idle / loading / error screen. -->
+        <Poster id="idleArt" width="1920" height="1080" uri="pkg:/images/splash_fhd.jpg" />
+        <Label id="title" translation="[96, 640]" width="1728" horizAlign="center" color="0xFFFFFFFF">
+            <Font role="font" uri="pkg:/fonts/Poppins-SemiBold.ttf" size="48" />
+        </Label>
+        <Label id="status" translation="[160, 716]" width="1600" horizAlign="center" wrap="true" color="0xC9C6EEFF"
+            text="Pick a channel on your phone and tap the cast icon.">
+            <Font role="font" uri="pkg:/fonts/Poppins-Regular.ttf" size="30" />
+        </Label>
 
         <!-- Channel banner: appears on channel change and on Left/Right. -->
         <Group id="banner" visible="false">
-            <Rectangle translation="[0, 780]" width="1920" height="300" color="0x000000CC" />
-            <Label id="bannerNumber" translation="[96, 830]" width="180" font="font:LargeBoldSystemFont" color="0x8B73FFFF" />
-            <Label id="bannerName" translation="[280, 820]" width="1540" font="font:LargeBoldSystemFont" color="0xFFFFFFFF" />
-            <Label id="bannerNow" translation="[280, 890]" width="1540" font="font:MediumSystemFont" color="0xFFFFFFFF" />
-            <Label id="bannerNext" translation="[280, 945]" width="1540" font="font:SmallSystemFont" color="0xBBBBCCFF" />
-            <Label translation="[280, 1000]" width="1540" font="font:SmallestSystemFont" color="0x888899FF"
-                text="Up/Down change channel  ·  OK guide  ·  Back exit" />
+            <Poster translation="[0, 760]" width="1920" height="320" uri="pkg:/images/banner.png" />
+            <Label id="bannerNumber" translation="[96, 836]" width="240" color="0x9B7BFFFF">
+                <Font role="font" uri="pkg:/fonts/Bungee-Regular.ttf" size="84" />
+            </Label>
+            <Label id="bannerName" translation="[340, 836]" width="1480" color="0xFFFFFFFF">
+                <Font role="font" uri="pkg:/fonts/Poppins-SemiBold.ttf" size="46" />
+            </Label>
+            <Label id="bannerNow" translation="[340, 904]" width="1480" color="0xFFFFFFFF">
+                <Font role="font" uri="pkg:/fonts/Poppins-Regular.ttf" size="30" />
+            </Label>
+            <Label id="bannerNext" translation="[340, 950]" width="1480" color="0xC9C6EEFF">
+                <Font role="font" uri="pkg:/fonts/Poppins-Regular.ttf" size="26" />
+            </Label>
+            <Label translation="[340, 1002]" width="1480" color="0x8F8BB8FF"
+                text="▲▼ CHANNEL     OK GUIDE     ◀▶ INFO     BACK EXIT">
+                <Font role="font" uri="pkg:/fonts/Poppins-SemiBold.ttf" size="20" />
+            </Label>
         </Group>
+
+        <Timecard id="timecard" />
 
         <!-- Cable-style guide: preview header, category menu with search, and a time grid. -->
         <Group id="guide" visible="false">
-            <Rectangle width="1920" height="1080" color="0x1B2140F5" />
+            <Poster width="1920" height="1080" uri="pkg:/images/bg.png" />
+            <Poster width="1920" height="440" uri="pkg:/images/header.png" />
 
             <!-- Preview of the focused programme. -->
-            <Rectangle translation="[0, 0]" width="1920" height="440" color="0x2A3366FF" />
-            <Rectangle translation="[96, 60]" width="480" height="270" color="0x11152BFF" />
+            <Poster translation="[96, 60]" width="480" height="270" uri="pkg:/images/timecard.png" />
             <Poster id="previewLogo" translation="[136, 95]" width="400" height="200" loadDisplayMode="scaleToFit" />
-            <Label id="previewTitle" translation="[640, 60]" width="1000" font="font:LargeBoldSystemFont" color="0xFFFFFFFF" />
-            <Label id="previewChannel" translation="[640, 120]" width="1000" font="font:MediumSystemFont" color="0xDDE2FFFF" />
-            <Label id="previewTime" translation="[640, 170]" width="1000" font="font:SmallSystemFont" color="0xB8C0F0FF" />
-            <Label id="previewDesc" translation="[640, 220]" width="1180" height="120" wrap="true" maxLines="3"
-                font="font:SmallSystemFont" color="0xEEEEFFFF" />
-            <Label id="clock" translation="[1580, 60]" width="244" horizAlign="right" font="font:MediumSystemFont" color="0xFFFFFFFF" />
-            <Label id="hint" translation="[640, 360]" width="1180" font="font:SmallestSystemFont" color="0x9FA8DDFF"
-                text="OK watch  ·  Left for menu and search  ·  Back close" />
+            <Label id="previewKicker" translation="[640, 58]" width="900" color="0x3FE0D0FF" text="ON NOW">
+                <Font role="font" uri="pkg:/fonts/Poppins-SemiBold.ttf" size="22" />
+            </Label>
+            <Label id="previewTitle" translation="[640, 88]" width="1000" color="0xFFFFFFFF">
+                <Font role="font" uri="pkg:/fonts/Poppins-SemiBold.ttf" size="52" />
+            </Label>
+            <Label id="previewChannel" translation="[640, 160]" width="1000" color="0xDDDAFFFF">
+                <Font role="font" uri="pkg:/fonts/Poppins-Regular.ttf" size="30" />
+            </Label>
+            <Label id="previewTime" translation="[640, 204]" width="1000" color="0xFF8FC0FF">
+                <Font role="font" uri="pkg:/fonts/Poppins-SemiBold.ttf" size="26" />
+            </Label>
+            <Label id="previewDesc" translation="[640, 248]" width="1180" height="120" wrap="true" maxLines="3" color="0xE6E4FFFF">
+                <Font role="font" uri="pkg:/fonts/Poppins-Regular.ttf" size="25" />
+            </Label>
+            <Label id="clock" translation="[1500, 52]" width="324" horizAlign="right" color="0xFFFFFFFF">
+                <Font role="font" uri="pkg:/fonts/Bungee-Regular.ttf" size="44" />
+            </Label>
+            <Label id="hint" translation="[1300, 112]" width="524" horizAlign="right" color="0x9F9BD0FF"
+                text="OK WATCH   ·   ◀ MENU &amp; SEARCH   ·   BACK CLOSE">
+                <Font role="font" uri="pkg:/fonts/Poppins-SemiBold.ttf" size="18" />
+            </Label>
 
             <!-- Category menu. -->
-            <Rectangle translation="[0, 440]" width="380" height="640" color="0x141936FF" />
+            <Rectangle translation="[0, 440]" width="380" height="640" color="0x0B0A1AB0" />
             <LabelList id="menu" translation="[40, 480]" itemSize="[310, 60]" numRows="9"
-                color="0xDDE2FFFF" focusedColor="0x141936FF" />
+                color="0xDDDAFFFF" focusedColor="0x0B0A1AFF">
+                <Font role="font" uri="pkg:/fonts/Poppins-Regular.ttf" size="28" />
+                <Font role="focusedFont" uri="pkg:/fonts/Poppins-SemiBold.ttf" size="28" />
+            </LabelList>
 
             <!-- Search (replaces the menu while active). -->
             <Group id="searchPanel" visible="false">
-                <Rectangle translation="[0, 440]" width="380" height="640" color="0x141936FF" />
-                <Label translation="[30, 470]" width="330" font="font:SmallBoldSystemFont" color="0xFFFFFFFF" text="Search channels and shows" />
-                <Label id="searchText" translation="[30, 515]" width="330" font="font:MediumSystemFont" color="0x8B73FFFF" text=" " />
-                <MiniKeyboard id="keyboard" translation="[16, 570]" />
+                <Rectangle translation="[0, 440]" width="380" height="640" color="0x0B0A1AE6" />
+                <Label translation="[30, 466]" width="330" color="0x3FE0D0FF" text="SEARCH CHANNELS &amp; SHOWS">
+                    <Font role="font" uri="pkg:/fonts/Poppins-SemiBold.ttf" size="20" />
+                </Label>
+                <Label id="searchText" translation="[30, 505]" width="330" color="0xFFFFFFFF" text=" ">
+                    <Font role="font" uri="pkg:/fonts/Poppins-SemiBold.ttf" size="34" />
+                </Label>
+                <Rectangle translation="[30, 552]" width="330" height="3" color="0x9B7BFFFF" />
+                <MiniKeyboard id="keyboard" translation="[16, 576]" />
             </Group>
 
-            <TimeGrid id="grid" translation="[400, 450]" numRows="6" duration="7200"
-                channelInfoWidth="200" channelNoDataText="Live programming" loadingDataText="Loading guide…"
-                programTitleColor="0xFFFFFFFF" programTitleFocusedColor="0x141936FF"
-                timeLabelColor="0xDDE2FFFF" channelInfoColor="0xFFFFFFFF" />
+            <TimeGrid id="grid" translation="[400, 456]" numRows="6" duration="7200"
+                channelInfoComponentName="ChannelCell" channelInfoWidth="230" infoGridGap="6"
+                channelNoDataText="Live programming" loadingDataText="Loading guide…"
+                programTitleColor="0xEDEBFFFF" programTitleFocusedColor="0x0B0A1AFF"
+                timeLabelColor="0xC9C6EEFF" timeBarHeight="56"
+                focusBitmapUri="pkg:/images/grid_focus.9.png"
+                programBackgroundBitmapUri="pkg:/images/grid_program.9.png"
+                channelInfoBackgroundBitmapUri="pkg:/images/grid_channel.9.png"
+                timeBarBitmapUri="pkg:/images/grid_timebar.9.png"
+                nowBarBlendColor="0xFF5FA2FF" pastTimeScreenBlendColor="0x0B0A1AFF"
+                programHorizMargin="16" fillProgramGaps="true">
+                <Font role="programTitleFont" uri="pkg:/fonts/Poppins-SemiBold.ttf" size="24" />
+                <Font role="timeLabelFont" uri="pkg:/fonts/Poppins-SemiBold.ttf" size="22" />
+            </TimeGrid>
             <Label id="emptyText" translation="[400, 700]" width="1440" horizAlign="center" visible="false"
-                font="font:MediumSystemFont" color="0xDDE2FFFF" text="No channels here yet." />
+                color="0xDDDAFFFF" text="No channels here yet.">
+                <Font role="font" uri="pkg:/fonts/Poppins-Regular.ttf" size="32" />
+            </Label>
         </Group>
 
         <Timer id="bannerTimer" duration="6" />
         <Timer id="refreshTimer" duration="300" repeat="true" />
         <Timer id="clockTimer" duration="20" repeat="true" />
         <Timer id="searchTimer" duration="0.6" />
+        <Timer id="programTimer" duration="20" repeat="true" />
     </children>
 </component>

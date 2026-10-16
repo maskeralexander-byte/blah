@@ -1,4 +1,4 @@
-' Free Live TV for Roku.
+' Live TV receiver for Roku.
 ' The Android app launches this channel over ECP (/launch/dev?contentId=<stream>&lineup=<url>&index=<n>)
 ' and sends channel changes while it runs (/input?...). It can also be opened from the Roku home
 ' screen, in which case it reloads the last channel lineup it saw.

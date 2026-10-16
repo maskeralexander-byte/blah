@@ -52,6 +52,16 @@ class M3uParserTest {
     }
 
     @Test
+    fun stripsStreamTagsFromNames() {
+        assertEquals(
+            "Cartoon Network Latin America Brazil",
+            M3uParser.cleanName("Cartoon Network Latin America Brazil (720p) [Geo-blocked]"),
+        )
+        assertEquals("ABC KMGH-TV", M3uParser.cleanName("ABC KMGH-TV (720p)"))
+        assertEquals("CBS News (Los Angeles)", M3uParser.cleanName("CBS News (Los Angeles) (1080i) [Not 24/7]"))
+    }
+
+    @Test
     fun takesFirstOfMultipleGroups() {
         val text = "#EXTINF:-1 group-title=\"Movies;Series\",Flix\nhttp://x/a.m3u8"
         assertEquals("Movies", M3uParser.parse(text, "t").single().group)

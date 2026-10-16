@@ -65,6 +65,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -394,6 +395,16 @@ fun PlayerScreen(vm: TvViewModel, onExit: () -> Unit) {
             }
         }
 
+        if (castTarget == null && !showList && error == null) {
+            NowPlayingCard(
+                channel = channel,
+                number = i + 1,
+                nowShow = guide.nowAndNext(channel, now).first,
+                now = now,
+                modifier = Modifier.align(Alignment.TopEnd).padding(top = 80.dp, end = 16.dp),
+            )
+        }
+
         if (showList) {
             ChannelListOverlay(vm, onClose = { showList = false }, modifier = Modifier.align(Alignment.CenterStart))
         }
@@ -410,12 +421,11 @@ private fun InfoBar(
     Row(
         modifier
             .fillMaxWidth()
-            .background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xEE000000))))
+            .background(Brush.verticalGradient(listOf(Color.Transparent, Night.copy(alpha = 0.85f), Night)))
             .padding(horizontal = if (compact) 16.dp else 32.dp, vertical = if (compact) 16.dp else 24.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("$number", color = Accent, fontWeight = FontWeight.Bold,
-            style = if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium)
+        Text("$number", style = numberStyle(if (compact) 26.sp else 44.sp))
         Spacer(Modifier.width(if (compact) 12.dp else 20.dp))
         ChannelLogo(channel, if (compact) 44.dp else 64.dp)
         Spacer(Modifier.width(if (compact) 12.dp else 20.dp))
@@ -428,8 +438,8 @@ private fun InfoBar(
                 style = if (compact) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium)
             NowNextLines(nowShow, next, compact)
             if (!compact) {
-                Text("▲▼ change channel · OK channel list · 0–9 jump to number · MENU favorite",
-                    color = Color(0xFF888899), style = MaterialTheme.typography.bodySmall)
+                Text("▲▼ CHANNEL   ·   OK GUIDE   ·   0–9 JUMP   ·   MENU FAVORITE",
+                    color = Color(0xFF8F8BB8), style = MaterialTheme.typography.labelSmall)
             }
         }
         IconButton(onClick = onFavorite) {

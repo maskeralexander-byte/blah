@@ -22,6 +22,12 @@ sub init()
     m.clock = m.top.FindNode("clock")
     m.clockTimer = m.top.FindNode("clockTimer")
     m.searchTimer = m.top.FindNode("searchTimer")
+    m.idleArt = m.top.FindNode("idleArt")
+    m.timecard = m.top.FindNode("timecard")
+    m.programTimer = m.top.FindNode("programTimer")
+    m.cardKey = ""
+    m.pendingCard = false
+    m.lastTitle = ""
     m.bannerTimer = m.top.FindNode("bannerTimer")
     m.refreshTimer = m.top.FindNode("refreshTimer")
 
@@ -46,6 +52,8 @@ sub init()
     m.keyboard.ObserveField("text", "onSearchTyped")
     m.searchTimer.ObserveField("fire", "runSearch")
     m.clockTimer.ObserveField("fire", "updateClock")
+    m.programTimer.ObserveField("fire", "checkProgramChange")
+    m.programTimer.control = "start"
     m.bannerTimer.ObserveField("fire", "hideBanner")
     m.refreshTimer.ObserveField("fire", "refreshLineup")
     m.refreshTimer.control = "start"
@@ -63,7 +71,7 @@ sub onRequest()
         saved = m.registry.Read("index")
         if saved <> "" then m.pendingIndex = saved.ToInt()
         m.lineupUri = uri
-        showStatus("Free Live TV", "Loading channels…")
+        showStatus("", "Loading channels…")
         loadLineup(uri)
         return
     end if
@@ -117,7 +125,7 @@ sub onLineup()
     if m.guide.visible then buildGuide(false)
 
     if m.channels.Count() = 0
-        showStatus("Free Live TV", "Open Free Live TV on your phone, pick a channel and tap the cast icon.")
+        showStatus("", "Pick a channel on your phone and tap the cast icon.")
         return
     end if
 
@@ -163,6 +171,10 @@ sub playStream(url as String, title as String, format as String, ua as String, r
     if headers.Count() > 0 then content.HttpHeaders = headers
 
     m.currentUrl = url
+    m.lastTitle = title
+    m.idleArt.visible = false
+    m.pendingCard = true
+    m.timecard.dismiss = true
     showStatus(title, "Loading…")
     m.video.control = "stop"
     m.video.content = content
@@ -174,6 +186,10 @@ sub onVideoState()
     if state = "playing"
         m.title.visible = false
         m.status.visible = false
+        if m.pendingCard
+            m.pendingCard = false
+            showTimecard(true)
+        end if
     else if state = "buffering"
         m.status.text = "Loading…"
         m.status.visible = true
@@ -224,6 +240,7 @@ end sub
 sub openGuide()
     if m.channels.Count() = 0 then return
     m.banner.visible = false
+    m.timecard.dismiss = true
     m.guide.visible = true
     updateClock()
     m.clockTimer.control = "start"
@@ -355,9 +372,15 @@ sub onProgramFocused()
     if row = invalid or row < 0 or row >= m.rowMap.Count() then return
     ch = m.channels[m.rowMap[row]]
     prog = d.content
-    m.previewChannel.text = (m.rowMap[row] + 1).ToStr() + "   " + valueOr(ch.name, "")
+    m.previewChannel.text = "Ch " + (m.rowMap[row] + 1).ToStr() + "   ·   " + valueOr(ch.name, "")
     if ch.logo <> invalid then m.previewLogo.uri = ch.logo else m.previewLogo.uri = ""
-    if prog <> invalid
+    if prog <> invalid and prog.description = "Live programming"
+        ' Channel without listings.
+        m.previewTitle.text = valueOr(ch.name, "")
+        m.previewChannel.text = "Ch " + (m.rowMap[row] + 1).ToStr()
+        m.previewTime.text = "ON NOW"
+        m.previewDesc.text = "Live programming"
+    else if prog <> invalid
         m.previewTitle.text = prog.title
         m.previewTime.text = fmtTime(prog.playStart) + " – " + fmtTime(prog.playStart + prog.playDuration)
         m.previewDesc.text = prog.description
@@ -438,6 +461,41 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
     end if
     return false
 end function
+
+' ---- Now-playing card ----
+
+' Shows the card for what's on the current channel. On a channel change it always shows;
+' otherwise only when a new programme has started since the last card.
+sub showTimecard(force as Boolean)
+    if m.guide.visible then return
+    now = CreateObject("roDateTime").AsSeconds()
+    info = { kicker: "Now playing", title: m.lastTitle, meta: "Live", progress: -1 }
+    key = m.currentUrl
+
+    if m.channels.Count() > 0 and m.index < m.channels.Count() and m.channels[m.index].url = m.currentUrl
+        ch = m.channels[m.index]
+        nn = nowNext(ch)
+        info.kicker = "Now playing  ·  Ch " + (m.index + 1).ToStr()
+        if nn.now <> invalid
+            span = nn.now.e - nn.now.s
+            info.title = nn.now.t
+            info.meta = fmtTime(nn.now.s) + " – " + fmtTime(nn.now.e) + "   ·   " + valueOr(ch.name, "")
+            if span > 0 then info.progress = (now - nn.now.s) / span
+            key = m.currentUrl + "|" + nn.now.s.ToStr()
+        else
+            info.title = valueOr(ch.name, "")
+            info.meta = "Live programming"
+        end if
+    end if
+
+    if not force and key = m.cardKey then return
+    m.cardKey = key
+    m.timecard.info = info
+end sub
+
+sub checkProgramChange()
+    if m.video.state = "playing" then showTimecard(false)
+end sub
 
 ' ---- Helpers ----
 

@@ -1,4 +1,4 @@
-# Free Live TV
+# Live TV
 
 An Android app for **phones and Android TV / Google TV / Fire TV** that streams thousands of
 free live TV channels. It works like a live-TV box: a channel guide, numbered channels,
@@ -79,11 +79,14 @@ It's installed once:
 the Roku remote works on its own. **Up/Down** change channel, **OK** opens the guide, **Left/Right**
 show the channel banner, **Back** closes the guide or exits.
 
+A "now playing" card slides in at the top right on every channel change and whenever a new show
+starts (on the phone and on the TV), with the show, its times and a progress bar.
+
 The guide is laid out like a cable guide: a preview of the focused show (logo, title, times,
 description, clock) on top, a time grid of channels and shows below, and a menu on the left
 (**Left** from the grid) with All Channels, Favorites, Recents, the biggest categories and **Search**,
 which filters channels and shows as you type on the on-screen keyboard. The Roku keeps a copy of the lineup, so it keeps working if the phone app closes, and you can
-open Free Live TV straight from the Roku home screen to pick up where you left off. (Guide times
+open Live TV straight from the Roku home screen to pick up where you left off. (Guide times
 refresh from the phone every 5 minutes while it's reachable.)
 
 When a newer receiver ships with the app, it updates the Roku automatically using the Developer Mode
@@ -93,6 +96,12 @@ password saved on the phone at first install.
 - If the Roku refuses requests, set Settings → System → Advanced system settings → Control by
   mobile apps → Network access to **Default** or **Permissive**.
 - Older Rokus that still have the built-in "Play on Roku" player work without the receiver.
+
+## Look
+
+Night-sky gradients with neon violet / cyan / pink accents, Poppins for text and Bungee for channel
+numbers and the clock (both SIL Open Font License, see `licenses/`). The Roku artwork, including the
+9-patch images for the guide grid, is drawn by `tools/make_roku_art.py`.
 
 ## Building
 

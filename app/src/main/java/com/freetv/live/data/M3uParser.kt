@@ -77,9 +77,19 @@ object M3uParser {
             if (ch == ',' && !inQuotes) { nameStart = i; break }
         }
         if (nameStart < 0) return ""
-        // Drop decorations like "Ⓢ" / "Ⓖ" that some playlists append.
-        return info.substring(nameStart + 1).replace(Regex("[Ⓐ-ⓩ]"), "").trim()
+        return cleanName(info.substring(nameStart + 1))
     }
+
+    /**
+     * Strips stream tags that playlists append to names: "(720p)", "[Geo-blocked]",
+     * "[Not 24/7]", and circled-letter markers like "Ⓢ" / "Ⓖ".
+     */
+    internal fun cleanName(raw: String): String = raw
+        .replace(Regex("[\u24B6-\u24E9]"), "")
+        .replace(Regex("""\s*\(\d{3,4}[pi]\)"""), "")
+        .replace(Regex("""\s*\[[^\]]*]"""), "")
+        .replace(Regex("""\s{2,}"""), " ")
+        .trim()
 
     /** Country code from tvg-country, or from an iptv-org style id like "CNN.us@SD". */
     internal fun countryOf(tvgCountry: String?, tvgId: String?): String? {

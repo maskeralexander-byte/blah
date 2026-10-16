@@ -18,7 +18,7 @@ data class RokuDevice(val host: String, val name: String)
 /**
  * Casts streams to Roku TVs and players using Roku's External Control Protocol (ECP):
  * SSDP to find devices on the local network, then an HTTP call on port 8060 that opens the
- * stream in the Free Live TV receiver channel (see /roku), or in the built-in player on older Rokus.
+ * stream in the Live TV receiver channel (see /roku), or in the built-in player on older Rokus.
  */
 class RokuCaster(private val context: Context) {
 
@@ -81,7 +81,7 @@ class RokuCaster(private val context: Context) {
             channel.referrer?.let { add("ref" to it) }
         }.joinToString("&") { (k, v) -> "$k=${URLEncoder.encode(v, "UTF-8")}" }
 
-        // 1. The Free Live TV receiver channel (sideloaded as "dev"): if it's already open,
+        // 1. The Live TV receiver channel (sideloaded as "dev"): if it's already open,
         //    hand it the new channel; otherwise launch it.
         if (activeAppId(device) == "dev") {
             post(device, "/input?$params")
@@ -104,7 +104,7 @@ class RokuCaster(private val context: Context) {
 
     /** Thrown when the Roku has neither the receiver channel nor the built-in player. */
     class ReceiverMissingException : IllegalStateException(
-        "This Roku needs the Free Live TV receiver installed first (a one-time setup)."
+        "This Roku needs the Live TV receiver installed first (a one-time setup)."
     )
 
     private fun activeAppId(device: RokuDevice): String? = try {

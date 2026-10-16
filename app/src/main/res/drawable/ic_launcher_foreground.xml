@@ -8,5 +8,5 @@
     <path android:strokeColor="#FFFFFF" android:strokeWidth="3" android:strokeLineCap="round"
         android:pathData="M44,28l10,10l10,-10" />
     <!-- play triangle -->
-    <path android:fillColor="#6C4DF6" android:pathData="M49,47l12,9l-12,9z" />
+    <path android:fillColor="#3FE0D0" android:pathData="M49,47l12,9l-12,9z" />
 </vector>
