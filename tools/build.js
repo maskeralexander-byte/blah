@@ -32,15 +32,19 @@ const { execSync } = require("child_process");
 const minPath = path.join(ROOT, "live", "pwr-live.min.js");
 const minCode = out.replace("__TARGETS__", "window.__PWR_T||{}") + "\n";
 fs.writeFileSync(minPath, minCode);
-// The loader follows this branch on jsDelivr, so a pushed build reaches existing bookmarks without
-// re-copying (jsDelivr caches branches; purge after pushing: see README).
+// The loader asks GitHub for this branch's latest commit and loads that exact build from jsDelivr,
+// so pushed builds reach existing bookmarks. LIVE_PIN is the fallback if GitHub can't be reached:
+// the last commit whose min file matches this build (run build, commit, build again, commit).
 const repo = "maskeralexander-byte/blah";
-let branch = "main";
+let branch = "main", pin = null;
 try { branch = execSync("git rev-parse --abbrev-ref HEAD", { cwd: ROOT }).toString().trim(); } catch (e) {}
-const url = `https://cdn.jsdelivr.net/gh/${repo}@${branch}/live/pwr-live.min.js`;
-html = html.replace(/\/\*LOADER:BEGIN\*\/[\s\S]*?\/\*LOADER:END\*\//, () => `/*LOADER:BEGIN*/const LIVE_URL = ${JSON.stringify(url)};/*LOADER:END*/`);
-console.log("Loader follows", url);
-console.log("After pushing, refresh the CDN copy:  curl " + url.replace("cdn.jsdelivr.net", "purge.jsdelivr.net"));
+try {
+  const sha = execSync("git log -1 --format=%H -- live/pwr-live.min.js", { cwd: ROOT }).toString().trim();
+  if (sha && execSync(`git show ${sha}:live/pwr-live.min.js`, { cwd: ROOT, maxBuffer: 1e8 }).toString() === minCode) pin = sha;
+} catch (e) {}
+const oldPin = (html.match(/const LIVE_PIN = "([0-9a-f]*)"/) || [])[1] || "";
+html = html.replace(/\/\*LOADER:BEGIN\*\/[\s\S]*?\/\*LOADER:END\*\//, () => `/*LOADER:BEGIN*/const LIVE_REPO = ${JSON.stringify(repo)}, LIVE_BRANCH = ${JSON.stringify(branch)}, LIVE_PIN = ${JSON.stringify(pin || oldPin)};/*LOADER:END*/`);
+console.log(pin ? `Fallback pinned to ${pin.slice(0, 10)}` : "Min file changed: commit, then run build again to pin the fallback.");
 
 const LS = String.fromCharCode(0x2028), PS = String.fromCharCode(0x2029);
 const literal = JSON.stringify(out).replace(/<\//g, "<\\/").split(LS).join("\\u2028").split(PS).join("\\u2029");
