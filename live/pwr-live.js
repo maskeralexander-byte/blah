@@ -120,20 +120,20 @@ function fromAria(root) {
   return body.length ? (head ? [head.cells, ...body] : body) : null;
 }
 
-function docs() {
+function docs(root = document) {
   const out = [];
   const walk = (d, depth) => {
     out.push(d);
     if (depth > 3) return;
-    for (const f of d.querySelectorAll("iframe,frame")) { try { if (f.contentDocument && f.contentDocument.documentElement) walk(f.contentDocument, depth + 1); } catch (e) { /* other site */ } }
+    for (const f of d.querySelectorAll("iframe,frame")) { if (f.hasAttribute("data-pwr-bg")) continue; try { if (f.contentDocument && f.contentDocument.documentElement) walk(f.contentDocument, depth + 1); } catch (e) { /* other site */ } }
   };
-  walk(document, 0);
+  walk(root, 0);
   return out;
 }
 
-function scan() {
+function scan(list = docs()) {
   const found = []; // raw grids, parsed below
-  for (const d of docs()) {
+  for (const d of list) {
     for (const r of d.querySelectorAll(WIDGET_SEL)) {
       if (!visible(r) || (r.parentElement && r.parentElement.closest(WIDGET_SEL))) continue;
       const tables = [...r.querySelectorAll("table")].filter(t => visible(t) && !(t.parentElement.closest("table") && r.contains(t.parentElement.closest("table"))));
@@ -158,13 +158,13 @@ function scan() {
   let parsed = found.map(parseGrid).filter(p => p.cols.length && Object.keys(p.data).length);
   // If no table gave recognizable columns, read the screen the way a person does.
   if (!parsed.some(p => p.cols.some(c => c.key))) {
-    const vis = docs().map(d => readVisual(d)).filter(Boolean);
+    const vis = list.map(d => readVisual(d)).filter(Boolean);
     if (vis.length) parsed = vis;
   }
-  L.hourNow = null;
-  for (const d of docs()) { const hv = readVisual(d, HOUR_RE, 2); if (hv) { L.hourNow = hv; break; } }
-  if (!parsed.length && !L.hourNow) for (const d of docs()) { const p = readTiles(d); if (p) parsed.push(p); }
-  return parsed;
+  let hourly = null;
+  for (const d of list) { const hv = readVisual(d, HOUR_RE, 2); if (hv) { hourly = hv; break; } }
+  if (!parsed.length && !hourly) for (const d of list) { const p = readTiles(d); if (p) parsed.push(p); }
+  return { parsed, hourly };
 }
 
 // What the page holds, for when no report table is found. Frames from another site can't be read.
@@ -317,12 +317,12 @@ function readTiles(d) {
 
 /* ---------- Session history ---------- */
 const KEY = "pwrLive.v1";
-const L = { snaps: [], cols: [], colSeen: {}, raw: {}, acc: {}, accLog: [], hourly: {}, hourlyPick: null, checkedAt: null, lastChangeAt: {}, interval: 15, sort: null, sortDir: -1, metric: null, mini: false, err: "" };
+const L = { snaps: [], cols: [], colSeen: {}, raw: {}, acc: {}, accLog: [], hourly: {}, hourlyPick: null, bg: {}, seenStores: {}, focus: null, checkedAt: null, lastChangeAt: {}, interval: 15, sort: null, sortDir: -1, metric: null, mini: false, err: "" };
 try {
   const saved = JSON.parse(sessionStorage.getItem(KEY) || "null");
-  if (saved && saved.snaps && saved.snaps.length && Date.now() - saved.snaps[saved.snaps.length - 1].t < 2 * 3600e3) Object.assign(L, { snaps: saved.snaps, cols: saved.cols || [], colSeen: saved.colSeen || {}, raw: saved.raw || {}, acc: saved.acc || {}, accLog: saved.accLog || [], hourly: saved.hourly || {}, lastChangeAt: saved.lastChangeAt || {} });
+  if (saved && saved.snaps && saved.snaps.length && Date.now() - saved.snaps[saved.snaps.length - 1].t < 2 * 3600e3) Object.assign(L, { snaps: saved.snaps, cols: saved.cols || [], colSeen: saved.colSeen || {}, raw: saved.raw || {}, acc: saved.acc || {}, accLog: saved.accLog || [], hourly: saved.hourly || {}, bg: saved.bg || {}, seenStores: saved.seenStores || {}, lastChangeAt: saved.lastChangeAt || {} });
 } catch (e) { /* storage blocked: history lasts until the page reloads */ }
-const save = () => { try { sessionStorage.setItem(KEY, JSON.stringify({ snaps: L.snaps.slice(-720), cols: L.cols, colSeen: L.colSeen, raw: L.raw, acc: L.acc, accLog: L.accLog, hourly: L.hourly, lastChangeAt: L.lastChangeAt })); } catch (e) {} };
+const save = () => { try { sessionStorage.setItem(KEY, JSON.stringify({ snaps: L.snaps.slice(-720), cols: L.cols, colSeen: L.colSeen, raw: L.raw, acc: L.acc, accLog: L.accLog, hourly: L.hourly, bg: L.bg, seenStores: L.seenStores, lastChangeAt: L.lastChangeAt })); } catch (e) {} };
 
 // Year-over-year %, SPLH (sales ÷ labor hours), and projected end of day (today × last year's full day ÷ last year so far).
 function addDerived(data) {
@@ -337,12 +337,15 @@ function addDerived(data) {
 
 function tick() {
   let found;
-  try { found = scan(); } catch (e) { L.err = "Couldn't read the page: " + e.message; render(); return; }
+  try { const sc = scan(); found = sc.parsed; L.hourNow = sc.hourly; } catch (e) { L.err = "Couldn't read the page: " + e.message; render(); return; }
   L.found = found;
   L.checkedAt = Date.now();
   if (L.hourNow) saveHourly(L.hourNow);
-  if (!found.length && L.hourNow) { L.err = ""; L.info = null; if (L.autoMini) { L.autoMini = false; api.show(); return; } render(); return; }
-  if (!found.length) {
+  // Tabs read in the background (fresh within 15 min) merge in first; the screen you're on wins.
+  const bgParts = Object.values(L.bg).filter(b => b.parsed && L.checkedAt - b.t < 15 * 60e3).flatMap(b => b.parsed.map(p => ({ p, t: b.t })));
+  const parts = [...bgParts, ...found.map(p => ({ p, t: L.checkedAt }))];
+  if (!found.length && L.hourNow && !bgParts.length) { L.err = ""; L.info = null; if (L.autoMini) { L.autoMini = false; api.show(); return; } render(); return; }
+  if (!found.length && !L.hourNow) {
     const signIn = docs().some(d => [...d.querySelectorAll('input[type="password"]')].some(visible));
     if (signIn) {
       L.err = "Sign in to PWR. The panel stays open and starts reading once you're on Real Time Sales.";
@@ -354,22 +357,28 @@ function tick() {
         ? `The report is in a section of the page that comes from ${info.blocked[0].host}, which PWR Live isn't allowed to read from here. Tap Open report to load that section by itself, then tap PWR Live again.`
         : frame ? "No report table on this screen yet. Open Real Time Sales (or another PWR report with a table)." : "No report table found on this page. Open Real Time Sales (or another PWR report with a table) and tap PWR Live again.";
     }
-    render(); return;
-  }
-  L.err = ""; L.info = null;
+    if (!bgParts.length || signIn) { render(); return; }
+    if (!L.info || !L.info.blocked.length) { L.err = ""; L.info = null; }
+  } else { L.err = ""; L.info = null; }
   if (L.autoMini) { L.autoMini = false; api.show(); return; }
   // Merge everything on this screen into the running board, so each PWR tab you visit adds
   // its columns (Sales, Labor, Service summary...) to the same stores.
   const last = L.snaps[L.snaps.length - 1];
   const data = JSON.parse(JSON.stringify(last ? last.data : {}));
-  for (const p of found) {
+  for (const { p, t: seenAt } of parts) {
+    for (const st of Object.keys(p.data)) if (st !== "This store") L.seenStores[st] = 1;
+    const keep = Object.keys(p.data).filter(st => !L.focus || st === L.focus || st === "This store");
+    if (!keep.length) continue;
     for (const c of p.cols) {
       const have = L.cols.find(x => x.id === c.id);
       if (!have) L.cols.push({ id: c.id, label: c.label, key: c.key && !L.cols.some(x => x.key === c.key && !x.derived) ? c.key : null });
-      L.colSeen[c.id] = L.checkedAt;
+      L.colSeen[c.id] = Math.max(L.colSeen[c.id] || 0, seenAt);
     }
-    for (const [st, vals] of Object.entries(p.data)) Object.assign(data[st] = data[st] || {}, vals);
-    for (const [st, vals] of Object.entries(p.raw || {})) Object.assign(L.raw[st] = L.raw[st] || {}, vals);
+    for (const st of keep) {
+      const name = st === "This store" && L.focus ? L.focus : st;
+      Object.assign(data[name] = data[name] || {}, p.data[st]);
+      if (p.raw && p.raw[st]) Object.assign(L.raw[name] = L.raw[name] || {}, p.raw[st]);
+    }
   }
   applyManual();
   addDerived(data);
@@ -383,6 +392,91 @@ function tick() {
   if (!L.metric || !L.cols.some(c => c.id === L.metric)) L.metric = (L.cols.find(c => c.key === "pcya") || L.cols.find(c => c.key === "sales") || L.cols[0]).id;
   render();
 }
+
+/* ---------- One store ---------- */
+try { L.focus = localStorage.getItem("pwrLive.focus") || null; } catch (e) {}
+function setFocus(st) {
+  L.focus = st || null;
+  try { st ? localStorage.setItem("pwrLive.focus", st) : localStorage.removeItem("pwrLive.focus"); } catch (e) {}
+  if (L.focus) {
+    const only = o => Object.fromEntries(Object.entries(o).filter(([k]) => k === L.focus));
+    L.snaps = L.snaps.map(s => ({ t: s.t, data: only(s.data) })).filter(s => Object.keys(s.data).length);
+    L.acc = only(L.acc); L.accLog = L.accLog.map(e => ({ t: e.t, h: only(e.h), s: only(e.s) }));
+    L.lastChangeAt = only(L.lastChangeAt);
+    if (L.hourly[L.focus]) L.hourlyPick = L.focus;
+  }
+  save(); tick();
+}
+
+/* ---------- Background tabs ----------
+   PWR tabs you add are reloaded in a hidden frame on a schedule and read the same way as the
+   screen you're on: the same as opening the tab yourself. Nothing is clicked or submitted. */
+let screens = [];
+try { screens = JSON.parse(localStorage.getItem("pwrLive.screens") || "[]"); } catch (e) {}
+let bgEvery = 3;
+try { bgEvery = +(localStorage.getItem("pwrLive.bgEvery") || 3); } catch (e) {}
+const saveScreens = () => { try { localStorage.setItem("pwrLive.screens", JSON.stringify(screens)); localStorage.setItem("pwrLive.bgEvery", String(bgEvery)); } catch (e) {} };
+const currentUrl = () => { try { return frame ? frame.contentWindow.location.href : location.href; } catch (e) { return location.href; } };
+const currentDoc = () => { try { return frame ? frame.contentDocument : document; } catch (e) { return document; } };
+const cleanUrl = u => { try { const x = new URL(u, location.href); x.hash = ""; return x.href; } catch (e) { return null; } };
+function addScreen(url, name) {
+  url = cleanUrl(url); if (!url) return "That tab doesn't have its own address.";
+  if (new URL(url).origin !== location.origin) return "That tab is on another site, so it can't be loaded here.";
+  const dup = screens.find(s => s.url === url);
+  if (dup) return dup.name === name ? `${name} is already added.` : `${name} has the same address as ${dup.name}: PWR switches it without changing the address, so it can't be loaded on its own.`;
+  screens.push({ url, name: name || url }); saveScreens(); bgSoon(); return `Added ${name}. It's read every ${bgEvery} min.`;
+}
+// Tabs on the current screen that have their own address (javascript: tabs can't be loaded separately).
+function tabLinks() {
+  const out = [], seen = new Set();
+  for (const d of docs(currentDoc() || document)) for (const a of d.querySelectorAll("a[href]")) {
+    const text = cellText(a), href = a.getAttribute("href") || "";
+    if (!text || text.length > 40 || !/sales|labor|hourly|summary|schedule|service|keys|real time|delivery|orders|map/i.test(text)) continue;
+    if (/^\s*javascript:|^#/.test(href)) { out.push({ name: text, url: null }); continue; }
+    const u = cleanUrl(a.href); if (!u || seen.has(u) || new URL(u).origin !== location.origin) continue;
+    seen.add(u); out.push({ name: text, url: u });
+  }
+  return out;
+}
+function bgLoad(s) {
+  return new Promise(res => {
+    const f = document.createElement("iframe");
+    f.setAttribute("data-pwr-bg", ""); f.setAttribute("aria-hidden", "true"); f.tabIndex = -1;
+    // On screen but invisible, so grids that only draw visible rows still draw.
+    f.style.cssText = "position:fixed;inset:0;width:100%;height:100%;border:0;opacity:0;pointer-events:none;z-index:-1;";
+    let done = false;
+    const finish = out => { if (done) return; done = true; clearTimeout(limit); f.remove(); res(out); };
+    const limit = setTimeout(() => finish({ err: "took too long to load" }), 45000);
+    f.addEventListener("load", () => setTimeout(() => {
+      try {
+        const d = f.contentDocument;
+        if (!d || !d.body) return finish({ err: "couldn't be read" });
+        if ([...d.querySelectorAll('input[type="password"]')].length) return finish({ err: "PWR asked to sign in" });
+        const sc = scan(docs(d));
+        finish(sc.parsed.length || sc.hourly ? sc : { err: "no table found" });
+      } catch (e) { finish({ err: e.message }); }
+    }, 6000));
+    f.src = s.url;
+    (document.body || document.documentElement).append(f);
+  });
+}
+let bgRunning = false, bgTimer = null;
+async function bgCycle() {
+  if (bgRunning || !screens.length) return;
+  bgRunning = true;
+  for (const s of [...screens]) {
+    if (cleanUrl(currentUrl()) === s.url) continue; // already reading it live
+    L.bgActive = s.name; render();
+    const out = await bgLoad(s);
+    L.bg[s.url] = { t: Date.now(), name: s.name, parsed: out.parsed || null, err: out.err || null };
+    if (out.hourly) saveHourly(out.hourly);
+  }
+  L.bgActive = null; bgRunning = false; save(); tick();
+}
+function bgSoon() { clearTimeout(bgTimer); bgTimer = setTimeout(bgCycle, 1500); }
+let bgLastRun = 0;
+const bgTickCheck = () => { if (screens.length && !bgRunning && Date.now() - bgLastRun >= bgEvery * 60e3) { bgLastRun = Date.now(); bgCycle(); } };
+setInterval(bgTickCheck, 15e3);
 
 /* ---------- Analysis ---------- */
 const colBy = k => L.cols.find(c => c.key === k);
@@ -712,6 +806,36 @@ function render() {
     h("select", { "aria-label": "Check interval", onchange: e => { L.interval = +e.target.value; restart(); } },
       [5, 15, 30, 60].map(n => h("option", { value: n, selected: n === L.interval ? "" : null }, n < 60 ? `${n} sec` : "1 min")))));
 
+  const storeList = Object.keys(L.seenStores).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  if (L.focus && !storeList.includes(L.focus)) storeList.unshift(L.focus);
+  body.append(h("div", { class: "row" }, h("label", { class: "muted", for: "pwrFocus" }, "Store"),
+    h("select", { id: "pwrFocus", onchange: e => setFocus(e.target.value) }, h("option", { value: "" }, "All stores"),
+      storeList.map(s => h("option", { value: s, selected: s === L.focus ? "" : null }, s))),
+    L.focus ? h("span", { class: "muted" }, "Only this store is analyzed.") : null));
+  // Background tabs.
+  const bgBox = h("details", { class: "ro", style: "display:block" }, h("summary", { style: "cursor:pointer;font-weight:600" },
+    `Background tabs (${screens.length})` + (L.bgActive ? ` · reading ${L.bgActive}…` : "")));
+  bgBox.open = !!L.bgOpen; bgBox.addEventListener("toggle", () => { L.bgOpen = bgBox.open; });
+  bgBox.append(h("div", { class: "muted", style: "margin:6px 0" }, "Tabs added here are reloaded and read in the background, so you don't have to open them. It's the same as opening the tab yourself; nothing is clicked or submitted."));
+  for (const s of screens) {
+    const b = L.bg[s.url];
+    bgBox.append(h("div", { class: "row", style: "justify-content:space-between" }, h("span", null, h("b", null, s.name), " ",
+      h("span", { class: "muted" }, b ? (b.err ? `· ${b.err} (${ago(b.t)})` : `· read ${ago(b.t)}`) : "· waiting")),
+      h("button", { class: "btn", type: "button", "aria-label": `Remove ${s.name}`, onclick: () => { screens = screens.filter(x => x !== s); delete L.bg[s.url]; saveScreens(); save(); render(); } }, "Remove")));
+  }
+  const addMsg = m => { L.bgMsg = m; render(); };
+  const curName = (() => { try { const d = currentDoc(); return (d && d.title) || "This screen"; } catch (e) { return "This screen"; } })();
+  bgBox.append(h("div", { class: "row", style: "margin-top:6px" },
+    h("button", { class: "btn", type: "button", onclick: () => addMsg(addScreen(currentUrl(), curName)) }, "Add this screen"),
+    h("label", { class: "muted", for: "bgEvery" }, "Read every"),
+    h("select", { id: "bgEvery", onchange: e => { bgEvery = +e.target.value; saveScreens(); render(); } }, [2, 3, 5, 10, 15].map(n => h("option", { value: n, selected: n === bgEvery ? "" : null }, `${n} min`)))));
+  const links = tabLinks();
+  if (links.length) bgBox.append(h("div", { class: "muted", style: "margin-top:6px" }, "Tabs on this page:"),
+    h("div", { class: "row" }, links.map(l => h("button", { class: "btn", type: "button", disabled: l.url ? null : "", title: l.url ? null : "This tab has no address of its own, so it can't be read in the background",
+      onclick: () => addMsg(addScreen(l.url, l.name)) }, (l.url ? "+ " : "") + l.name))));
+  if (L.bgMsg) bgBox.append(h("div", { class: "muted", style: "margin-top:6px" }, L.bgMsg));
+  body.append(bgBox);
+
   if (L.err) body.append(h("div", { class: "al warn" }, L.err));
   if (L.err && L.info) {
     const i = L.info;
@@ -747,7 +871,7 @@ function render() {
   const spBox = h("div", null, h("h3", null, "Live SPLH (sales per labor hour)"));
   const goalVs = v => splhGoal && v != null ? h("span", { class: v >= splhGoal ? "up" : "down" }, `${v >= splhGoal ? "▲" : "▼"} ${money(Math.abs(v - splhGoal))} vs goal`) : "";
   const hStores = Object.keys(L.hourly);
-  const hst = L.hourly[L.hourlyPick] ? L.hourlyPick : hStores[0];
+  const hst = L.focus && L.hourly[L.focus] ? L.focus : L.hourly[L.hourlyPick] ? L.hourlyPick : hStores[0];
   const mode = hst ? null : laborMode();
   const goalCls2 = v => v == null || !splhGoal ? "" : v >= splhGoal ? "good" : v < splhGoal * 0.8 ? "bad" : "warn";
   if (hst) {
