@@ -37,7 +37,7 @@ fs.writeFileSync(minPath, minCode);
 const repo = "maskeralexander-byte/blah";
 let branch = "main";
 try { branch = execSync("git rev-parse --abbrev-ref HEAD", { cwd: ROOT }).toString().trim(); } catch (e) {}
-const url = `https://cdn.jsdelivr.net/gh/${repo}@${encodeURIComponent(branch)}/live/pwr-live.min.js`;
+const url = `https://cdn.jsdelivr.net/gh/${repo}@${branch}/live/pwr-live.min.js`;
 html = html.replace(/\/\*LOADER:BEGIN\*\/[\s\S]*?\/\*LOADER:END\*\//, () => `/*LOADER:BEGIN*/const LIVE_URL = ${JSON.stringify(url)};/*LOADER:END*/`);
 console.log("Loader follows", url);
 console.log("After pushing, refresh the CDN copy:  curl " + url.replace("cdn.jsdelivr.net", "purge.jsdelivr.net"));
