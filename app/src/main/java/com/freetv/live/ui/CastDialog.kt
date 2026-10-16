@@ -1,6 +1,8 @@
 package com.freetv.live.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -41,6 +43,7 @@ fun CastDialog(vm: TvViewModel, onDismiss: () -> Unit) {
     val scanning by vm.scanning.collectAsState()
     val target by vm.castTarget.collectAsState()
     val message by vm.castMessage.collectAsState()
+    val receiverMissing by vm.receiverMissing.collectAsState()
     var ip by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) { if (target == null) vm.scanRokus() }
@@ -50,7 +53,10 @@ fun CastDialog(vm: TvViewModel, onDismiss: () -> Unit) {
         icon = { Icon(Icons.Default.Cast, null) },
         title = { Text("Cast to Roku") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 rokus.forEach { d ->
                     val active = target?.host == d.host
                     Surface(
@@ -77,6 +83,13 @@ fun CastDialog(vm: TvViewModel, onDismiss: () -> Unit) {
                     }
                 }
                 message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                if (target != null) {
+                    if (receiverMissing) {
+                        ReceiverSetup(vm)
+                    } else {
+                        OutlinedButton(onClick = vm::requestReceiverUpdate) { Text("Update Roku app") }
+                    }
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     OutlinedTextField(
                         ip, { ip = it }, Modifier.weight(1f),

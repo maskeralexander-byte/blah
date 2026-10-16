@@ -258,9 +258,20 @@ class RokuCaster(private val context: Context) {
                 readTimeout = 2_500
             }
             try {
-                val xml = conn.inputStream.bufferedReader().use { it.readText() }
-                Regex("""<app[^>]*\bid="dev"[^>]*>""").find(xml)?.value
-                    ?.let { Regex("""version="([^"]+)"""").find(it)?.groupValues?.get(1) }
+                devVersionIn(conn.inputStream.bufferedReader().use { it.readText() })
+            } finally {
+                conn.disconnect()
+            }
+        } catch (_: Exception) {
+            null
+        } ?: try {
+            // Some Rokus restrict the app list; the active app (when it's ours) also carries a version.
+            val conn = (URL("http://${device.host}:8060/query/active-app").openConnection() as HttpURLConnection).apply {
+                connectTimeout = 2_500
+                readTimeout = 2_500
+            }
+            try {
+                devVersionIn(conn.inputStream.bufferedReader().use { it.readText() })
             } finally {
                 conn.disconnect()
             }
@@ -268,6 +279,10 @@ class RokuCaster(private val context: Context) {
             null
         }
     }
+
+    private fun devVersionIn(xml: String): String? =
+        Regex("""<app[^>]*\bid="dev"[^>]*>""").find(xml)?.value
+            ?.let { Regex("""version="([^"]+)"""").find(it)?.groupValues?.get(1) }
 
     fun formatOf(url: String): String {
         val path = Uri.parse(url).path.orEmpty().lowercase()

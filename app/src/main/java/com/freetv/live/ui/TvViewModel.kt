@@ -42,7 +42,15 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = ChannelRepository(app)
     private val caster = RokuCaster(app)
     private val guideRepo = GuideRepository(app)
-    private val lineupServer = LineupServer { lineupJson() }
+    private val lineupServer = LineupServer {
+        // Record which lineup the TV actually fetched; see checkReceiverFetched().
+        fetchedLineupVersion = lineupVersion()
+        lastLineupFetchAt = System.currentTimeMillis()
+        lineupJson()
+    }
+
+    @Volatile private var fetchedLineupVersion: String? = null
+    @Volatile private var lastLineupFetchAt = 0L
 
     private val _guide = MutableStateFlow(Guide.Empty)
     val guide: StateFlow<Guide> = _guide.asStateFlow()
@@ -263,6 +271,31 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
         return false
     }
 
+    /**
+     * The current receiver downloads the lineup right after it gets a new one. If that doesn't
+     * happen, the Roku is running an old receiver (or can't reach this phone), so say so.
+     */
+    private fun checkReceiverFetched(device: RokuDevice, sentVersion: String) {
+        // The TV only re-downloads when the lineup changed since its last download.
+        if (fetchedLineupVersion == sentVersion) return
+        val sentAt = System.currentTimeMillis()
+        viewModelScope.launch {
+            kotlinx.coroutines.delay(12_000)
+            if (_castTarget.value?.host != device.host || lastLineupFetchAt >= sentAt) return@launch
+            if (lineupVersion() != sentVersion) return@launch // A newer send is already being checked.
+            _receiverMissing.value = true
+            _receiverUpdate.value = true
+            _castMessage.value = "The TV guide and Roku remote need the updated receiver on ${device.name}. " +
+                "If you've already updated, check that your phone and Roku are on the same Wi-Fi."
+        }
+    }
+
+    /** Shows the receiver install/update card on request. */
+    fun requestReceiverUpdate() {
+        _receiverMissing.value = true
+        _receiverUpdate.value = true
+    }
+
     private fun isOlder(a: String, b: String): Boolean {
         val x = a.split('.').map { it.toIntOrNull() ?: 0 }
         val y = b.split('.').map { it.toIntOrNull() ?: 0 }
@@ -380,11 +413,13 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
             _castMessage.value = "Sending ${channel.name} to ${device.name}…"
             if (!ensureReceiverCurrent(device)) return@launch
             // Hand the TV the whole lineup so its remote can change channels and open the guide.
+            val sentVersion = lineupVersion()
             val extra = lineupServer.start(viewModelScope)?.let { url ->
-                mapOf("lineup" to url, "index" to "$index", "v" to lineupVersion())
+                mapOf("lineup" to url, "index" to "$index", "v" to sentVersion)
             }.orEmpty()
             _castMessage.value = try {
                 caster.play(device, channel, extra)
+                if (extra.isNotEmpty()) checkReceiverFetched(device, sentVersion)
                 if (channel.userAgent != null || channel.referrer != null) {
                     "Playing on ${device.name}. This channel needs special headers, so it may not load on Roku."
                 } else {
