@@ -197,6 +197,11 @@ details.panel[open] > summary { margin-bottom: 12px; }
 .note { font-size: 0.82rem; color: var(--ink-3); margin: 10px 0 0; max-width: 75ch; }
 #copyFallback { width: 100%; min-height: 160px; margin-top: 10px; font-family: var(--mono); font-size: 12px; }
 footer { color: var(--ink-3); font-size: 0.8rem; }
+.steps { margin: 0 0 12px; padding-left: 1.3em; color: var(--ink-2); display: flex; flex-direction: column; gap: 2px; }
+.live-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.live-row select { max-width: 100%; }
+.live-more { margin-top: 10px; }
+.live-more summary { cursor: pointer; color: var(--ink-2); font-size: 0.85rem; font-weight: 500; }
 @media (prefers-reduced-motion: no-preference) { .tile, .chip, .btn { transition: border-color .15s, opacity .15s, filter .15s; } }
 </style>
 </head>
@@ -220,6 +225,31 @@ footer { color: var(--ink-3); font-size: 0.8rem; }
   </header>
 
   <div id="message" class="msg" hidden></div>
+
+  <section id="livePanel" class="panel" hidden aria-label="Live site">
+    <div class="panel-head">
+      <div><span class="eyebrow">Live site</span><h2>Pull data from the report website</h2></div>
+      <div class="tools"><span id="lockPill" class="status good">View-only lock on</span></div>
+    </div>
+    <ol class="steps">
+      <li>Click <b>Open site</b>. A browser window opens; sign in there yourself.</li>
+      <li>Go to the PWR report and set the stores and dates you want.</li>
+      <li>Click <b>Read report from page</b>, or use the site's own export button and then <b>Load latest export</b>.</li>
+    </ol>
+    <div class="live-row">
+      <button class="btn" id="btnLiveOpen" type="button">Open site</button>
+      <button class="btn primary" id="btnLiveCapture" type="button">Read report from page</button>
+      <button class="btn" id="btnLiveDownload" type="button" disabled>Load latest export</button>
+      <select class="ctl" id="liveTable" aria-label="Table on the page" hidden></select>
+    </div>
+    <p class="note" id="liveStatus">Checking the connector…</p>
+    <details class="live-more">
+      <summary>View-only lock</summary>
+      <p class="note">This app never clicks, types or submits anything on the site. It only reads the tables on the page you have open and the exports you download. The lock also stops the browser window from sending anything that could change data (saves, submissions, deletes). Sign-in is the one exception. If a report won't load while locked, turn the lock off, load the report, and turn it back on.</p>
+      <p class="note" id="liveBlocked"></p>
+      <button class="btn small" id="btnLiveLock" type="button">Turn lock off</button>
+    </details>
+  </section>
 
   <section id="pastePanel" class="panel" hidden>
     <div class="panel-head"><h2>Paste report data</h2><span class="muted">Copy the table from Excel, Google Sheets, or the report screen, including the header row.</span></div>
@@ -1116,6 +1146,61 @@ function handleFile(file) {
     reader.readAsText(file);
   }
 }
+
+/* ---------- Live site (only when served by the local connector) ---------- */
+const LIVE = { on: false, status: null, capture: null, seenDownload: null };
+async function api(path, body) {
+  const res = await fetch(path, body === undefined ? { cache: "no-store" } : { method: "POST", headers: { "Content-Type": "application/json", "X-PWR": "1" }, body: JSON.stringify(body) });
+  if (!res.ok) { let msg = res.statusText; try { msg = (await res.json()).error || msg; } catch {} throw new Error(msg); }
+  return res;
+}
+async function liveRefresh() {
+  try { LIVE.status = await (await api("/api/status")).json(); }
+  catch { if (LIVE.on) $("liveStatus").textContent = "Lost contact with the connector. Is it still running?"; return; }
+  if (!LIVE.status.connector) return;
+  LIVE.on = true; $("livePanel").hidden = false;
+  const st = LIVE.status;
+  $("lockPill").className = "status " + (st.locked ? "good" : "warn");
+  $("lockPill").textContent = st.locked ? "View-only lock on" : "Lock off";
+  $("btnLiveLock").textContent = st.locked ? "Turn lock off" : "Turn lock back on";
+  $("liveStatus").textContent = !st.browserOpen ? "Browser not open yet." + (st.startUrl ? "" : " Start the connector with --url=<site address> to open the site directly, or type the address in the browser window.")
+    : st.page ? `Viewing: ${st.page.title || st.page.url}` : "Browser open.";
+  $("liveBlocked").textContent = st.blockedCount ? `Blocked ${st.blockedCount} request${st.blockedCount === 1 ? "" : "s"} that could have changed data. Latest: ${st.blocked[0].method} ${st.blocked[0].url}` : "Nothing has been blocked so far.";
+  const dl = $("btnLiveDownload");
+  dl.disabled = !st.download;
+  dl.textContent = st.download ? `Load latest export (${st.download.name})` : "Load latest export";
+  if (st.download && LIVE.seenDownload && st.download.at !== LIVE.seenDownload) showMessage(`New export from the site: ${st.download.name}. Click Load latest export to analyze it.`);
+  LIVE.seenDownload = st.download?.at || LIVE.seenDownload || "none";
+}
+function liveLoadTable(i) {
+  const cap = LIVE.capture, t = cap.tables[i];
+  loadGrid(t.rows.map(r => r.map(String)), `Live: ${cap.title || cap.url}`);
+}
+$("btnLiveOpen").onclick = async () => { try { await api("/api/open", {}); setTimeout(liveRefresh, 800); } catch (e) { showMessage("Couldn't open the browser: " + e.message, true); } };
+$("btnLiveCapture").onclick = async () => {
+  try {
+    const cap = await (await api("/api/capture", {})).json();
+    if (!cap.tables.length) { showMessage("No tables found on the page in the browser window. Open the PWR report there first. If the site only shows charts, use its export button and Load latest export.", true); return; }
+    // Rank tables by how many PWR columns they contain.
+    cap.tables.forEach(t => { const hr = findHeaderRow(t.rows); t.score = Object.values(autoMap(t.rows[hr].map(String))).filter(i => i >= 0).length; });
+    LIVE.capture = cap;
+    const order = cap.tables.map((t, i) => i).sort((a, b) => cap.tables[b].score - cap.tables[a].score || cap.tables[b].rows.length - cap.tables[a].rows.length);
+    const sel = $("liveTable"); sel.replaceChildren();
+    for (const i of order) { const t = cap.tables[i]; sel.append(h("option", { value: String(i) }, `${t.caption || "Table " + (i + 1)} · ${t.rows.length - 1} rows · ${t.score} columns matched`)); }
+    sel.hidden = cap.tables.length < 2;
+    liveLoadTable(order[0]);
+  } catch (e) { showMessage("Couldn't read the page: " + e.message, true); }
+};
+$("liveTable").onchange = e => liveLoadTable(+e.target.value);
+$("btnLiveDownload").onclick = async () => {
+  try {
+    const res = await api("/api/download");
+    const name = decodeURIComponent(res.headers.get("X-Filename") || "export.csv");
+    handleFile(new File([await res.blob()], name));
+  } catch (e) { showMessage("Couldn't load the export: " + e.message, true); }
+};
+$("btnLiveLock").onclick = async () => { try { await api("/api/lock", { locked: !LIVE.status.locked }); liveRefresh(); } catch (e) { showMessage(e.message, true); } };
+if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) { liveRefresh().then(() => { if (LIVE.on) setInterval(liveRefresh, 3000); }); }
 
 /* ---------- Wiring ---------- */
 $("btnImport").onclick = () => $("fileInput").click();
