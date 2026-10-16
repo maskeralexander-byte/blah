@@ -45,6 +45,13 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _recents = MutableStateFlow(repo.recents())
 
+    /** Channels that failed to play in the last 24 hours. */
+    private val _failed = MutableStateFlow(repo.failures())
+    val failed: StateFlow<Map<String, Long>> = _failed.asStateFlow()
+
+    private val _hideFailed = MutableStateFlow(repo.hideFailed)
+    val hideFailed: StateFlow<Boolean> = _hideFailed.asStateFlow()
+
     private val _section = MutableStateFlow<Section>(Section.All)
     val section: StateFlow<Section> = _section.asStateFlow()
 
@@ -75,9 +82,15 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
             .sortedBy { it.label }
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
+    private val _filters = combine(_section, _query, _failed, _hideFailed) { section, query, failed, hide ->
+        Filters(section, query, if (hide) failed.keys else emptySet())
+    }
+
+    private data class Filters(val section: Section, val query: String, val hidden: Set<String>)
+
     val visible: StateFlow<List<Channel>> = combine(
-        _channels, _section, _query, _favorites, _recents,
-    ) { all, section, query, favs, recents ->
+        _channels, _filters, _favorites, _recents,
+    ) { all, (section, query, hidden), favs, recents ->
         val base = when (section) {
             Section.All -> all
             Section.Favorites -> all.filter { it.url in favs }
@@ -88,8 +101,10 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
             is Section.Group -> all.filter { it.group == section.name }
             is Section.Country -> all.filter { it.country == section.code }
         }
+        // Favorites always stay visible, even when they failed recently.
+        val healthy = if (section == Section.Favorites || hidden.isEmpty()) base else base.filter { it.url !in hidden }
         val q = query.trim()
-        if (q.isEmpty()) base else base.filter {
+        if (q.isEmpty()) healthy else healthy.filter {
             it.name.contains(q, ignoreCase = true) || it.group.contains(q, ignoreCase = true)
         }
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -116,6 +131,27 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
         val fav = c.url !in _favorites.value
         repo.setFavorite(c.url, fav)
         _favorites.value = repo.favorites()
+    }
+
+    fun markFailed(c: Channel) {
+        repo.setFailed(c.url, true)
+        _failed.value = repo.failures()
+    }
+
+    fun markWorking(c: Channel) {
+        if (c.url !in _failed.value) return
+        repo.setFailed(c.url, false)
+        _failed.value = repo.failures()
+    }
+
+    fun setHideFailed(hide: Boolean) {
+        repo.hideFailed = hide
+        _hideFailed.value = hide
+    }
+
+    fun clearFailures() {
+        _failed.value.keys.forEach { repo.setFailed(it, false) }
+        _failed.value = repo.failures()
     }
 
     fun play(list: List<Channel>, index: Int) {

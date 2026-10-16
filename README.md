@@ -18,8 +18,15 @@ Duplicates are removed. Lists refresh every 12 hours and are cached for offline 
 You can turn sources on or off, or add any M3U/M3U8 playlist link you're entitled to use
 (for example your TV provider's IPTV link) under **Settings → Channel sources**.
 
-Because these are public lists, some streams go offline at any time. If a channel doesn't play,
-press ▲/▼ to move on.
+Because these are public lists, some streams go offline at any time. To keep things watchable:
+
+- **Auto-reconnect:** if a stream stalls or drops, the player reconnects on its own (up to 6 tries,
+  backing off from 1 s to 15 s) and jumps back to the live edge if it falls behind.
+- **Dead channels are hidden:** a channel that won't play is hidden for 24 hours, then tried again.
+  Favorites always stay visible. Turn this off, or un-hide them, under **Channel sources**.
+
+Note: the public lists also contain some unofficial rebroadcasts of paid channels. These tend to be the
+least reliable streams, and the app makes no attempt to keep them working.
 
 ## Using it
 

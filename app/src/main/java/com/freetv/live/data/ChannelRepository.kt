@@ -75,6 +75,25 @@ class ChannelRepository(context: Context) {
         prefs.edit().putString(KEY_RECENTS, JSONArray(list).toString()).apply()
     }
 
+    // ---- Channel health ----
+
+    /** URL -> time it last failed to play. Entries older than [FAIL_TTL_MS] are dropped. */
+    fun failures(): Map<String, Long> {
+        val o = JSONObject(prefs.getString(KEY_FAILED, "{}")!!)
+        val cutoff = System.currentTimeMillis() - FAIL_TTL_MS
+        return o.keys().asSequence().associateWith { o.getLong(it) }.filterValues { it > cutoff }
+    }
+
+    fun setFailed(url: String, failed: Boolean) {
+        val map = failures().toMutableMap()
+        if (failed) map[url] = System.currentTimeMillis() else map -= url
+        prefs.edit().putString(KEY_FAILED, JSONObject(map as Map<*, *>).toString()).apply()
+    }
+
+    var hideFailed: Boolean
+        get() = prefs.getBoolean(KEY_HIDE_FAILED, true)
+        set(value) = prefs.edit().putBoolean(KEY_HIDE_FAILED, value).apply()
+
     // ---- Loading ----
 
     /** Loads every enabled source in parallel; falls back to the cached copy when offline. */
@@ -140,6 +159,9 @@ class ChannelRepository(context: Context) {
         const val KEY_DISABLED = "disabled_sources"
         const val KEY_FAVS = "favorites"
         const val KEY_RECENTS = "recents"
+        const val KEY_FAILED = "failed"
+        const val KEY_HIDE_FAILED = "hide_failed"
+        const val FAIL_TTL_MS = 24L * 60 * 60 * 1000
         const val CACHE_MS = 12L * 60 * 60 * 1000
     }
 }

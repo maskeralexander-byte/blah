@@ -26,6 +26,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -42,6 +43,8 @@ import androidx.compose.ui.unit.dp
 fun SourcesScreen(vm: TvViewModel, onBack: () -> Unit) {
     val sources by vm.sources.collectAsState()
     val disabled by vm.disabledSources.collectAsState()
+    val hideFailed by vm.hideFailed.collectAsState()
+    val failed by vm.failed.collectAsState()
     var name by remember { mutableStateOf("") }
     var url by remember { mutableStateOf("") }
 
@@ -61,6 +64,28 @@ fun SourcesScreen(vm: TvViewModel, onBack: () -> Unit) {
                 Modifier.padding(start = 12.dp, bottom = 8.dp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+        item {
+            Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surface) {
+                Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Hide channels that aren't working", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                "Channels that failed to play are hidden for 24 hours, then tried again. " +
+                                    "Favorites always stay visible. ${failed.size} hidden now.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Switch(checked = hideFailed, onCheckedChange = vm::setHideFailed)
+                    }
+                    if (failed.isNotEmpty()) {
+                        TextButton(onClick = vm::clearFailures) { Text("Show them again now") }
+                    }
+                }
+            }
         }
         items(sources, key = { it.id }) { src ->
             Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surface) {

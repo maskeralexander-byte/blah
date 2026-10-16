@@ -64,8 +64,10 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.util.Util
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.freetv.live.data.Channel
@@ -84,7 +86,17 @@ fun PlayerScreen(vm: TvViewModel, onExit: () -> Unit) {
     val channel = queue.getOrNull(i) ?: return
 
     val context = LocalContext.current
-    val player = remember { ExoPlayer.Builder(context).build().apply { playWhenReady = true } }
+    val player = remember {
+        ExoPlayer.Builder(context)
+            // Keep a deeper buffer than the default so short network stalls don't stop playback.
+            .setLoadControl(
+                DefaultLoadControl.Builder()
+                    .setBufferDurationsMs(20_000, 60_000, 2_500, 5_000)
+                    .build()
+            )
+            .build()
+            .apply { playWhenReady = true }
+    }
     DisposableEffect(Unit) { onDispose { player.release() } }
 
     var buffering by remember { mutableStateOf(true) }
@@ -94,18 +106,49 @@ fun PlayerScreen(vm: TvViewModel, onExit: () -> Unit) {
     var digits by remember { mutableStateOf("") }
     // Streams without a recognisable extension are tried as HLS first, then as a plain stream.
     var forceProgressive by remember(channel.url) { mutableStateOf(false) }
+    // Reconnect state: a drop restarts the stream after a short backoff instead of giving up.
+    var played by remember(channel.url) { mutableStateOf(false) }
+    var retries by remember(channel.url) { mutableIntStateOf(0) }
+    var reconnectAt by remember(channel.url) { mutableStateOf<Long?>(null) }
+    var restartKey by remember(channel.url) { mutableIntStateOf(0) }
 
     DisposableEffect(player, channel.url) {
+        fun scheduleReconnect(reason: String) {
+            val max = if (played) MAX_RETRIES_AFTER_PLAYING else MAX_RETRIES_BEFORE_PLAYING
+            if (retries < max) {
+                reconnectAt = System.currentTimeMillis() + backoffMs(retries)
+                retries++
+            } else {
+                error = "This channel isn't working right now ($reason)."
+                vm.markFailed(channel)
+            }
+        }
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
                 buffering = state == Player.STATE_BUFFERING
-                if (state == Player.STATE_READY) error = null
+                when (state) {
+                    Player.STATE_READY -> {
+                        error = null
+                        retries = 0
+                        reconnectAt = null
+                        if (!played) {
+                            played = true
+                            vm.markWorking(channel)
+                        }
+                    }
+                    // A live stream should never end; treat it as a dropped connection.
+                    Player.STATE_ENDED -> scheduleReconnect("stream ended")
+                    else -> Unit
+                }
             }
             override fun onPlayerError(e: PlaybackException) {
-                if (!forceProgressive && guessedHls(channel.url)) {
-                    forceProgressive = true
-                } else {
-                    error = "This channel isn't working right now (${e.errorCodeName})."
+                when {
+                    e.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW -> {
+                        player.seekToDefaultPosition()
+                        player.prepare()
+                    }
+                    !played && !forceProgressive && guessedHls(channel.url) -> forceProgressive = true
+                    else -> scheduleReconnect(e.errorCodeName)
                 }
             }
         }
@@ -113,12 +156,21 @@ fun PlayerScreen(vm: TvViewModel, onExit: () -> Unit) {
         onDispose { player.removeListener(listener) }
     }
 
-    LaunchedEffect(channel.url, forceProgressive) {
+    LaunchedEffect(reconnectAt) {
+        val at = reconnectAt ?: return@LaunchedEffect
+        delay((at - System.currentTimeMillis()).coerceAtLeast(0))
+        reconnectAt = null
+        restartKey++
+    }
+
+    LaunchedEffect(channel.url, forceProgressive, restartKey) {
         error = null
         buffering = true
         startChannel(player, channel, forceProgressive)
-        overlayVisible = true
-        overlayTick++
+        if (restartKey == 0) {
+            overlayVisible = true
+            overlayTick++
+        }
     }
 
     LaunchedEffect(overlayTick) {
@@ -178,8 +230,14 @@ fun PlayerScreen(vm: TvViewModel, onExit: () -> Unit) {
             modifier = Modifier.fillMaxSize(),
         )
 
-        if (buffering && error == null) {
-            CircularProgressIndicator(Modifier.align(Alignment.Center), color = Accent)
+        if ((buffering || reconnectAt != null) && error == null) {
+            Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                CircularProgressIndicator(color = Accent)
+                if (reconnectAt != null || retries > 0) {
+                    Spacer(Modifier.padding(6.dp))
+                    Text("Reconnecting…", color = Color.White, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
         }
 
         error?.let {
@@ -267,6 +325,11 @@ private fun InfoBar(channel: Channel, number: Int, total: Int, favorite: Boolean
     }
 }
 
+private const val MAX_RETRIES_BEFORE_PLAYING = 2
+private const val MAX_RETRIES_AFTER_PLAYING = 6
+
+private fun backoffMs(attempt: Int): Long = minOf(1_000L shl attempt, 15_000L)
+
 private fun guessedHls(url: String): Boolean =
     Util.inferContentType(Uri.parse(url)) == C.CONTENT_TYPE_OTHER && !hasMediaExtension(url)
 
@@ -288,7 +351,10 @@ private fun startChannel(player: ExoPlayer, channel: Channel, forceProgressive: 
         if (!forceProgressive && guessedHls(channel.url)) setMimeType(MimeTypes.APPLICATION_M3U8)
     }.build()
 
-    player.setMediaSource(DefaultMediaSourceFactory(http).createMediaSource(item))
+    val factory = DefaultMediaSourceFactory(http)
+        // Retry individual segment/playlist downloads before surfacing an error.
+        .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(8))
+    player.setMediaSource(factory.createMediaSource(item))
     player.prepare()
     player.play()
 }
