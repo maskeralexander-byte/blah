@@ -26,37 +26,31 @@ Default targets (ADT ≤ 25:00, load ≤ 13:00, make ≤ 1:30, rack ≤ 4:00, OT
 - `index.html` – the app (no build step).
 - `sample-pwr.csv` – example data in the expected shape (made-up stores and figures).
 
-## Pull data straight from the report website (view-only)
+## PWR Live: real-time analysis on pwr.dominos.com (no install)
 
-The `connector/` folder is a small program you run on your own computer. It opens the report website in a normal browser window, you sign in there yourself, and the analyzer reads the report from that window.
+PWR Live is a bookmark. Tap it while you're on a PWR report page (for example Real Time Sales) and the analyzer opens as a panel on top of the page. It works on that page because it runs there, in your own signed-in browser. Nothing is installed and no password is involved.
 
-**First time setup** (needs [Node.js](https://nodejs.org) 18 or newer):
+What it shows, refreshed every 5 to 60 seconds:
+
+- **Sales so far** for the stores on screen, and change vs last year.
+- **Projected end of day**: today's sales × (last year's full day ÷ last year at this time).
+- **Last 30 min vs last year**, for the group and for each store, so you can see who is slowing down right now.
+- **Needs attention**: stores behind last year, stores whose last-30-minute pace is 15%+ under last year, metrics past your targets (for example ADT), times rising fast, and stores that stopped reporting for 20+ minutes.
+- A **store table** you can sort by tapping a column, and a **chart** of any column since you started watching.
+- **Copy table for the analyzer** copies the current table so you can paste it into the full analyzer.
+
+It's read-only: it reads the text of the table on screen and never clicks, types, submits, or sends anything. The history it builds while you watch stays in that browser tab (session storage), so it survives a page refresh but nothing is sent anywhere. Tap the bookmark again after a full page reload.
+
+**Set it up** from the PWR Live section in the analyzer (index.html): copy the bookmark code and save it as a bookmark named "PWR Live". On Android Chrome, open it by typing "PWR Live" in the address bar while on the PWR page and tapping the bookmark.
+
+Check your company's policy before using browser bookmarks like this on work systems.
+
+## Development
+
+- `live/pwr-live.js` is the bookmark's source. It shares the metric engine with `index.html` (the `/*ENGINE:BEGIN*/ … /*ENGINE:END*/` blocks).
+- After editing either, rebuild the bookmark that's embedded in `index.html`:
 
 ```
-cd connector
-npm run setup
+npm i --no-save terser   # optional, makes the bookmark smaller
+node tools/build.js
 ```
-
-**Each time:**
-
-```
-cd connector
-node server.js --url=https://<your report site address>
-```
-
-Then open http://localhost:8787. A **Live site** panel appears:
-
-1. **Open site**: a browser window opens. Sign in there (including any 2-step code).
-2. Go to the PWR report and pick the stores and dates.
-3. **Read report from page** pulls the table you're looking at into the analyzer. If the page has several tables, pick the right one from the list. Or click the site's own Export button and then **Load latest export**.
-
-Your sign-in is kept in `connector/.browser-profile` on your computer so you don't have to log in every time. Delete that folder to sign out completely. It is never committed (see `.gitignore`).
-
-### How it stays view-only
-
-- The connector never clicks, types, or submits anything on the site. It only reads the text of tables on the page you have open, and files you export yourself.
-- The **view-only lock** (on by default) blocks every request from that browser window that could change data: form submissions, saves, edits, deletes (POST/PUT/PATCH/DELETE). Sign-in requests are the only exception. Blocked requests are listed in the Live site panel.
-- If a report page won't load while locked (some sites use a "submit" request just to run a report), turn the lock off in the panel, load the report, and turn it back on. Use `--allow=<text in the URL>` to always allow one specific request instead.
-- The connector only accepts connections from your own computer, and only from the analyzer page it serves.
-
-Check your company's policy on automated tools before using this with a work account.

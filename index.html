@@ -200,8 +200,10 @@ footer { color: var(--ink-3); font-size: 0.8rem; }
 .steps { margin: 0 0 12px; padding-left: 1.3em; color: var(--ink-2); display: flex; flex-direction: column; gap: 2px; }
 .live-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .live-row select { max-width: 100%; }
-.live-more { margin-top: 10px; }
-.live-more summary { cursor: pointer; color: var(--ink-2); font-size: 0.85rem; font-weight: 500; }
+.setup { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 12px 24px; margin: 12px 0; }
+.how h3 { font-family: var(--body); font-size: 0.9rem; margin-bottom: 6px; }
+a.bm { text-decoration: none; display: inline-block; padding: 2px 10px; cursor: grab; }
+#bmFallback { width: 100%; min-height: 90px; margin-top: 10px; font-family: var(--mono); font-size: 11px; }
 @media (prefers-reduced-motion: no-preference) { .tile, .chip, .btn { transition: border-color .15s, opacity .15s, filter .15s; } }
 </style>
 </head>
@@ -226,29 +228,34 @@ footer { color: var(--ink-3); font-size: 0.8rem; }
 
   <div id="message" class="msg" hidden></div>
 
-  <section id="livePanel" class="panel" hidden aria-label="Live site">
+  <section id="livePanel" class="panel" aria-label="PWR Live">
     <div class="panel-head">
-      <div><span class="eyebrow">Live site</span><h2>Pull data from the report website</h2></div>
-      <div class="tools"><span id="lockPill" class="status good">View-only lock on</span></div>
+      <div><span class="eyebrow">Real time</span><h2>PWR Live: analyze the live page as it updates</h2></div>
+      <span class="status good">Read-only</span>
     </div>
-    <ol class="steps">
-      <li>Click <b>Open site</b>. A browser window opens; sign in there yourself.</li>
-      <li>Go to the PWR report and set the stores and dates you want.</li>
-      <li>Click <b>Read report from page</b>, or use the site's own export button and then <b>Load latest export</b>.</li>
-    </ol>
-    <div class="live-row">
-      <button class="btn" id="btnLiveOpen" type="button">Open site</button>
-      <button class="btn primary" id="btnLiveCapture" type="button">Read report from page</button>
-      <button class="btn" id="btnLiveDownload" type="button" disabled>Load latest export</button>
-      <select class="ctl" id="liveTable" aria-label="Table on the page" hidden></select>
+    <p class="note" style="margin-top:0">A bookmark that opens this analyzer as a panel on top of pwr.dominos.com. It reads the Real Time Sales table every few seconds and shows pace against last year, projected end-of-day sales, and stores that slow down or stop reporting. It only reads what's on your screen. It never clicks, changes, or sends anything. Nothing to install.</p>
+    <div class="setup">
+      <div class="how">
+        <h3>On your phone (Chrome)</h3>
+        <ol class="steps">
+          <li>Tap <b>Copy bookmark code</b> below.</li>
+          <li>In Chrome, bookmark any page (tap ⋮ then ☆), then tap <b>Edit</b>.</li>
+          <li>Name it <b>PWR Live</b>. Clear the URL field, paste the code, and save.</li>
+          <li>On pwr.dominos.com Real Time Sales, tap the address bar, type <b>PWR Live</b>, and tap the bookmark in the list.</li>
+        </ol>
+      </div>
+      <div class="how">
+        <h3>On a computer</h3>
+        <ol class="steps">
+          <li>Drag this button to your bookmarks bar: <a class="btn primary bm" id="bmLink" href="#" title="Drag me to your bookmarks bar">PWR Live</a></li>
+          <li>Or copy the code and paste it as a new bookmark's URL.</li>
+          <li>On pwr.dominos.com Real Time Sales, click the bookmark.</li>
+        </ol>
+      </div>
     </div>
-    <p class="note" id="liveStatus">Checking the connector…</p>
-    <details class="live-more">
-      <summary>View-only lock</summary>
-      <p class="note">This app never clicks, types or submits anything on the site. It only reads the tables on the page you have open and the exports you download. The lock also stops the browser window from sending anything that could change data (saves, submissions, deletes). Sign-in is the one exception. If a report won't load while locked, turn the lock off, load the report, and turn it back on.</p>
-      <p class="note" id="liveBlocked"></p>
-      <button class="btn small" id="btnLiveLock" type="button">Turn lock off</button>
-    </details>
+    <div class="live-row"><button class="btn primary" id="btnCopyBm" type="button">Copy bookmark code</button><span class="muted" id="bmNote"></span></div>
+    <textarea id="bmFallback" hidden readonly></textarea>
+    <p class="note">Your targets are built into the bookmark. If you change them under Targets, copy the code again and update the bookmark.</p>
   </section>
 
   <section id="pastePanel" class="panel" hidden>
@@ -334,8 +341,12 @@ footer { color: var(--ink-3); font-size: 0.8rem; }
 /* ---------- Metric catalog ---------- */
 // agg: sum = add across rows; wavg = average weighted by orders when available.
 // dir: 'up' = higher is better, 'down' = lower is better, null = informational.
+/*ENGINE:BEGIN*/
 const METRICS = [
-  { key: "sales", label: "Net sales", unit: "$", agg: "sum", dir: "up", syn: ["netsales", "sales", "totalsales", "grosssales", "royaltysales", "salesnet", "storesales", "adjustednetsales"] },
+  { key: "sales", label: "Net sales", unit: "$", agg: "sum", dir: "up", syn: ["todaysroyaltysales", "todayssales", "todaysnetsales", "netsales", "sales", "totalsales", "grosssales", "royaltysales", "salesnet", "storesales", "adjustednetsales"] },
+  { key: "py_sales", label: "Last year, same time", unit: "$", agg: "sum", dir: null, syn: ["pyroyaltysalesst", "pyroyaltysales", "pysalesst", "pysales", "lysales", "lastyearsales", "priorsales"] },
+  { key: "py_eod", label: "Last year, full day", unit: "$", agg: "sum", dir: null, syn: ["pyroyaltysaleseod", "pysaleseod", "pyeod", "lyeod"] },
+  { key: "pcya", label: "vs last year", unit: "%", agg: "wavg", dir: "up", target: 0, syn: ["pcyast", "pcya", "pcyaeod", "vslastyear", "vsly", "yoy", "pctchange"] },
   { key: "orders", label: "Orders", unit: "#", agg: "sum", dir: "up", syn: ["orders", "ordercount", "tickets", "totalorders", "transactions", "ticketcount", "totaltickets"] },
   { key: "avg_ticket", label: "Avg ticket", unit: "$", agg: "wavg", dir: "up", syn: ["avgticket", "averageticket", "avgorder", "aov", "ticketavg", "averageorder", "avgcheck", "averagecheck"] },
   { key: "deliveries", label: "Deliveries", unit: "#", agg: "sum", dir: "up", syn: ["deliveries", "deliverycount", "deliveryorders", "delorders", "totaldeliveries"] },
@@ -357,6 +368,7 @@ const DIMS = {
   date: { label: "Date / week ending", syn: ["date", "businessdate", "day", "weekending", "weekendingdate", "weekend", "periodending", "week", "period", "reportdate"] },
   store: { label: "Store", syn: ["store", "storenumber", "storeno", "storeid", "storenum", "location", "unit", "storename", "site"] },
 };
+/*ENGINE:END*/
 const SERIES_VARS = ["--s1", "--s2", "--s3", "--s4", "--s5", "--s6", "--s7", "--s8"];
 const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -429,6 +441,7 @@ function parseDelimited(text) {
   return out.filter(r => r.some(c => String(c).trim() !== ""));
 }
 
+/*ENGINE:BEGIN*/
 function parseNumber(v) {
   if (v == null) return null;
   if (typeof v === "number") return isFinite(v) ? v : null;
@@ -446,6 +459,8 @@ function parseNumber(v) {
   return isFinite(n) && t !== "" ? (neg ? -n : n) : null;
 }
 
+/*ENGINE:END*/
+
 function parseDate(v) {
   if (v == null || v === "") return null;
   const t = String(v).trim();
@@ -460,6 +475,7 @@ function parseDate(v) {
 const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const fromIso = t => { const [y, m, d] = t.split("-").map(Number); return new Date(y, m - 1, d || 1); };
 
+/*ENGINE:BEGIN*/
 // Find the header row: reports often start with a title block.
 function findHeaderRow(grid) {
   const all = [...METRICS.map(m => m.syn), DIMS.date.syn, DIMS.store.syn].flat();
@@ -486,6 +502,8 @@ function autoMap(headers) {
   }
   return map;
 }
+
+/*ENGINE:END*/
 
 function loadGrid(grid, sourceName, isSample) {
   if (!grid.length) { showMessage("That file has no rows to read.", true); return; }
@@ -561,6 +579,11 @@ function aggregate(rows, key) {
     for (const r of rows) if (r.m.deliveries != null && r.m.orders) { d += r.m.deliveries; o += r.m.orders; }
     return o ? d / o * 100 : null;
   }
+  if (key === "pcya" && S.map.sales >= 0 && S.map.py_sales >= 0) {
+    let sa = 0, py = 0;
+    for (const r of rows) if (r.m.sales != null && r.m.py_sales) { sa += r.m.sales; py += r.m.py_sales; }
+    if (py) return (sa - py) / py * 100;
+  }
   let sum = 0, w = 0, n = 0;
   for (const r of rows) {
     const v = r.m[key]; if (v == null) continue;
@@ -603,6 +626,7 @@ function status(key, v) {
 }
 const STATUS_TEXT = { good: "On target", warn: "Near target", bad: "Off target" };
 
+/*ENGINE:BEGIN*/
 function fmt(key, v, short) {
   if (v == null || !isFinite(v)) return "–";
   const u = M[key].unit;
@@ -613,6 +637,7 @@ function fmt(key, v, short) {
   if (u === "#") return Math.round(v).toLocaleString();
   return v.toFixed(2);
 }
+/*ENGINE:END*/
 const pct = (a, b) => (a == null || b == null || b === 0) ? null : (a - b) / Math.abs(b) * 100;
 
 /* ---------- Rendering ---------- */
@@ -1046,7 +1071,7 @@ function renderTargets() {
     grid.append(h("div", { class: "f" },
       h("label", { for: id }, h("span", null, `${def.label} ${def.dir === "up" ? "at least" : "at most"}`), h("span", { class: "muted" }, unitTxt)),
       h("input", { id, type: "number", step: "any", value: S.targets[k] ?? "", placeholder: "No target",
-        onchange: e => { const v = e.target.value.trim(); S.targets[k] = v === "" ? null : +v; store.set("pwr.targets", S.targets); renderAll(); } })));
+        onchange: e => { const v = e.target.value.trim(); S.targets[k] = v === "" ? null : +v; store.set("pwr.targets", S.targets); renderAll(); refreshBookmark(); } })));
   }
 }
 
@@ -1147,60 +1172,18 @@ function handleFile(file) {
   }
 }
 
-/* ---------- Live site (only when served by the local connector) ---------- */
-const LIVE = { on: false, status: null, capture: null, seenDownload: null };
-async function api(path, body) {
-  const res = await fetch(path, body === undefined ? { cache: "no-store" } : { method: "POST", headers: { "Content-Type": "application/json", "X-PWR": "1" }, body: JSON.stringify(body) });
-  if (!res.ok) { let msg = res.statusText; try { msg = (await res.json()).error || msg; } catch {} throw new Error(msg); }
-  return res;
-}
-async function liveRefresh() {
-  try { LIVE.status = await (await api("/api/status")).json(); }
-  catch { if (LIVE.on) $("liveStatus").textContent = "Lost contact with the connector. Is it still running?"; return; }
-  if (!LIVE.status.connector) return;
-  LIVE.on = true; $("livePanel").hidden = false;
-  const st = LIVE.status;
-  $("lockPill").className = "status " + (st.locked ? "good" : "warn");
-  $("lockPill").textContent = st.locked ? "View-only lock on" : "Lock off";
-  $("btnLiveLock").textContent = st.locked ? "Turn lock off" : "Turn lock back on";
-  $("liveStatus").textContent = !st.browserOpen ? "Browser not open yet." + (st.startUrl ? "" : " Start the connector with --url=<site address> to open the site directly, or type the address in the browser window.")
-    : st.page ? `Viewing: ${st.page.title || st.page.url}` : "Browser open.";
-  $("liveBlocked").textContent = st.blockedCount ? `Blocked ${st.blockedCount} request${st.blockedCount === 1 ? "" : "s"} that could have changed data. Latest: ${st.blocked[0].method} ${st.blocked[0].url}` : "Nothing has been blocked so far.";
-  const dl = $("btnLiveDownload");
-  dl.disabled = !st.download;
-  dl.textContent = st.download ? `Load latest export (${st.download.name})` : "Load latest export";
-  if (st.download && LIVE.seenDownload && st.download.at !== LIVE.seenDownload) showMessage(`New export from the site: ${st.download.name}. Click Load latest export to analyze it.`);
-  LIVE.seenDownload = st.download?.at || LIVE.seenDownload || "none";
-}
-function liveLoadTable(i) {
-  const cap = LIVE.capture, t = cap.tables[i];
-  loadGrid(t.rows.map(r => r.map(String)), `Live: ${cap.title || cap.url}`);
-}
-$("btnLiveOpen").onclick = async () => { try { await api("/api/open", {}); setTimeout(liveRefresh, 800); } catch (e) { showMessage("Couldn't open the browser: " + e.message, true); } };
-$("btnLiveCapture").onclick = async () => {
-  try {
-    const cap = await (await api("/api/capture", {})).json();
-    if (!cap.tables.length) { showMessage("No tables found on the page in the browser window. Open the PWR report there first. If the site only shows charts, use its export button and Load latest export.", true); return; }
-    // Rank tables by how many PWR columns they contain.
-    cap.tables.forEach(t => { const hr = findHeaderRow(t.rows); t.score = Object.values(autoMap(t.rows[hr].map(String))).filter(i => i >= 0).length; });
-    LIVE.capture = cap;
-    const order = cap.tables.map((t, i) => i).sort((a, b) => cap.tables[b].score - cap.tables[a].score || cap.tables[b].rows.length - cap.tables[a].rows.length);
-    const sel = $("liveTable"); sel.replaceChildren();
-    for (const i of order) { const t = cap.tables[i]; sel.append(h("option", { value: String(i) }, `${t.caption || "Table " + (i + 1)} · ${t.rows.length - 1} rows · ${t.score} columns matched`)); }
-    sel.hidden = cap.tables.length < 2;
-    liveLoadTable(order[0]);
-  } catch (e) { showMessage("Couldn't read the page: " + e.message, true); }
+/* ---------- PWR Live bookmark ---------- */
+/*BOOKMARKLET:BEGIN*/const LIVE_CODE = "!function(e){const t=[{key:\"sales\",label:\"Net sales\",unit:\"$\",agg:\"sum\",dir:\"up\",syn:[\"todaysroyaltysales\",\"todayssales\",\"todaysnetsales\",\"netsales\",\"sales\",\"totalsales\",\"grosssales\",\"royaltysales\",\"salesnet\",\"storesales\",\"adjustednetsales\"]},{key:\"py_sales\",label:\"Last year, same time\",unit:\"$\",agg:\"sum\",dir:null,syn:[\"pyroyaltysalesst\",\"pyroyaltysales\",\"pysalesst\",\"pysales\",\"lysales\",\"lastyearsales\",\"priorsales\"]},{key:\"py_eod\",label:\"Last year, full day\",unit:\"$\",agg:\"sum\",dir:null,syn:[\"pyroyaltysaleseod\",\"pysaleseod\",\"pyeod\",\"lyeod\"]},{key:\"pcya\",label:\"vs last year\",unit:\"%\",agg:\"wavg\",dir:\"up\",target:0,syn:[\"pcyast\",\"pcya\",\"pcyaeod\",\"vslastyear\",\"vsly\",\"yoy\",\"pctchange\"]},{key:\"orders\",label:\"Orders\",unit:\"#\",agg:\"sum\",dir:\"up\",syn:[\"orders\",\"ordercount\",\"tickets\",\"totalorders\",\"transactions\",\"ticketcount\",\"totaltickets\"]},{key:\"avg_ticket\",label:\"Avg ticket\",unit:\"$\",agg:\"wavg\",dir:\"up\",syn:[\"avgticket\",\"averageticket\",\"avgorder\",\"aov\",\"ticketavg\",\"averageorder\",\"avgcheck\",\"averagecheck\"]},{key:\"deliveries\",label:\"Deliveries\",unit:\"#\",agg:\"sum\",dir:\"up\",syn:[\"deliveries\",\"deliverycount\",\"deliveryorders\",\"delorders\",\"totaldeliveries\"]},{key:\"delivery_pct\",label:\"Delivery mix\",unit:\"%\",agg:\"wavg\",dir:null,syn:[\"deliverypct\",\"deliverymix\",\"deliverypercent\",\"dlvpct\",\"delpct\",\"deliveryratio\"]},{key:\"adt\",label:\"Avg delivery time\",unit:\"min\",agg:\"wavg\",dir:\"down\",target:25,syn:[\"adt\",\"avgdeliverytime\",\"averagedeliverytime\",\"deliverytime\",\"avgdeltime\",\"avgdelivery\"]},{key:\"load_time\",label:\"Load time\",unit:\"min\",agg:\"wavg\",dir:\"down\",target:13,syn:[\"loadtime\",\"avgloadtime\",\"averageloadtime\",\"load\"]},{key:\"make_time\",label:\"Make time\",unit:\"min\",agg:\"wavg\",dir:\"down\",target:1.5,syn:[\"maketime\",\"avgmaketime\",\"averagemaketime\",\"make\"]},{key:\"rack_time\",label:\"Rack time\",unit:\"min\",agg:\"wavg\",dir:\"down\",target:4,syn:[\"racktime\",\"avgracktime\",\"averageracktime\",\"rack\",\"rackwait\"]},{key:\"otd_pct\",label:\"On-time delivery\",unit:\"%\",agg:\"wavg\",dir:\"up\",target:85,syn:[\"otd\",\"otdpct\",\"ontime\",\"ontimedelivery\",\"ontimepct\",\"pctontime\",\"ontimepercent\",\"otdpercent\"]},{key:\"dph\",label:\"Deliveries / driver hr\",unit:\"x\",agg:\"wavg\",dir:\"up\",target:2.5,syn:[\"dph\",\"deliveriesperhour\",\"delsperhour\",\"runsperhour\",\"deliveriesperdriverhour\",\"dlvperhr\",\"delperhour\"]},{key:\"labor_pct\",label:\"Labor\",unit:\"%\",agg:\"wavg\",dir:\"down\",target:25,syn:[\"laborpct\",\"labor\",\"laborpercent\",\"labour\",\"labourpct\",\"laborcostpct\",\"actuallabor\",\"laborcost\"]},{key:\"food_pct\",label:\"Food cost\",unit:\"%\",agg:\"wavg\",dir:\"down\",target:28,syn:[\"foodpct\",\"food\",\"foodcost\",\"foodcostpct\",\"actualfood\",\"actualfoodpct\",\"cogs\",\"cogspct\"]},{key:\"food_var\",label:\"Food variance\",unit:\"pts\",agg:\"wavg\",dir:\"down\",target:1,syn:[\"foodvariance\",\"foodvar\",\"variance\",\"idealvsactual\",\"avi\",\"actualvsideal\",\"foodvariancepct\"]},{key:\"remakes\",label:\"Remakes\",unit:\"#\",agg:\"sum\",dir:\"down\",syn:[\"remakes\",\"remake\",\"badorders\",\"remakecount\",\"remakeorders\"]},{key:\"osat\",label:\"OSAT\",unit:\"%\",agg:\"wavg\",dir:\"up\",target:80,syn:[\"osat\",\"csat\",\"satisfaction\",\"overallsatisfaction\",\"guestsatisfaction\",\"osatpct\"]}],n=Object.fromEntries(t.map((e=>[e.key,e]))),a={date:{label:\"Date / week ending\",syn:[\"date\",\"businessdate\",\"day\",\"weekending\",\"weekendingdate\",\"weekend\",\"periodending\",\"week\",\"period\",\"reportdate\"]},store:{label:\"Store\",syn:[\"store\",\"storenumber\",\"storeno\",\"storeid\",\"storenum\",\"location\",\"unit\",\"storename\",\"site\"]}};function o(e){if(null==e)return null;if(\"number\"==typeof e)return isFinite(e)?e:null;let t=String(e).trim();if(!t||/^(n\\/?a|-+|\\u2014)$/i.test(t))return null;const n=t.match(/^(-?)(\\d+):(\\d{1,2})(?::(\\d{1,2}))?$/);if(n){const e=n[1]?-1:1,t=+n[2],a=+n[3],o=null!=n[4]?+n[4]:null;return e*(null==o?t+a/60:60*t+a+o/60)}let a=!1;/^\\(.*\\)$/.test(t)&&(a=!0,t=t.slice(1,-1)),t=t.replace(/[$,%\\s\\xa3\\u20ac]/g,\"\");const o=Number(t);return isFinite(o)&&\"\"!==t?a?-o:o:null}function s(e,t,a){if(null==t||!isFinite(t))return\"\\u2013\";const o=n[e].unit;if(\"$\"===o)return(t<0?\"-$\":\"$\")+Math.abs(t).toLocaleString(void 0,{maximumFractionDigits:Math.abs(t)>=1e3?0:2,minimumFractionDigits:Math.abs(t)>=1e3?0:2});if(\"%\"===o)return t.toFixed(1)+\"%\";if(\"min\"===o){const e=t<0,n=Math.abs(t),a=Math.floor(n),o=Math.round(60*(n-a));return(e?\"-\":\"\")+(60===o?`${a+1}:00`:`${a}:${String(o).padStart(2,\"0\")}`)}return\"pts\"===o?(t>0&&!a?\"+\":\"\")+t.toFixed(2):\"#\"===o?Math.round(t).toLocaleString():t.toFixed(2)}if(window.__pwrLive)return void window.__pwrLive.show();const l=e=>String(e??\"\").toLowerCase().replace(/[^a-z0-9]/g,\"\"),i=Object.assign(Object.fromEntries(t.filter((e=>null!=e.target)).map((e=>[e.key,e.target]))),e||{}),r=[\"#2a78d6\",\"#eb6834\",\"#1baf7a\",\"#eda100\",\"#e87ba4\",\"#008300\",\"#6250d6\",\"#e34948\"],d=30,c=20;function p(e,t){const a=i[e],o=n[e];if(!o||null==t||null==a||!o.dir)return null;const s=Math.max(.05*Math.abs(a),\"pts\"===o.unit?.1:0);return\"up\"===o.dir?t>=a?\"good\":t>=a-s?\"warn\":\"bad\":t<=a?\"good\":t<=a+s?\"warn\":\"bad\"}const u='.k-grid,.dx-datagrid,.ag-root-wrapper,.slick-grid,.e-grid,.mat-table,.mat-mdc-table,[role=\"grid\"],[role=\"treegrid\"]',g=e=>e.getClientRects().length>0,f=e=>(e.innerText??e.textContent??\"\").replace(/\\s+/g,\" \").trim(),b=e=>!!e.closest('tfoot,[class*=\"footer\" i]'),h=e=>!!e.closest(\"thead\")||e.cells.length>0&&[...e.cells].every((e=>\"TH\"===e.tagName)),y=e=>b(e)||/group|footer|aggregate|total|summary/i.test(e.className||\"\");function v(e){const t=[];for(const n of e.cells){t.push(f(n));for(let e=1;e<(n.colSpan||1);e++)t.push(\"\")}return t}function m(e){const t=[];e.forEach(((e,n)=>{t[n]=t[n]||[];let a=0;for(const o of e.cells){for(;void 0!==t[n][a];)a++;const e=Math.max(1,o.colSpan||1),s=Math.max(1,o.rowSpan||1),l=f(o);for(let o=0;o<s;o++)for(let s=0;s<e;s++)(t[n+o]=t[n+o]||[])[a+s]=l;a+=e}}));const n=Math.max(0,...t.map((e=>e.length)));return Array.from({length:n},((e,n)=>[...new Set(t.map((e=>e[n])).filter(Boolean))].join(\" \")))}function x(e){const t=[],n=[];for(const a of e){if(b(a))continue;const e=[...a.rows].filter((e=>e.closest(\"table\")===a)),o=e.filter(h),s=e.filter((e=>!h(e)&&!y(e)));o.length&&t.push(m(o)),s.length&&n.push(s.map(v))}if(!n.length)return null;let a;a=n.every((e=>e.length===n[0].length))?n[0].map(((e,t)=>n.flatMap((e=>e[t])))):n.sort(((e,t)=>t.length-e.length))[0];const o=t.flat();return o.length?[o,...a]:a}function k(e){const t=new Map;let n=0;for(const a of e.querySelectorAll('[role=\"row\"]')){if(!g(a))continue;const e=[...a.querySelectorAll('[role=\"columnheader\"],[role=\"gridcell\"],[role=\"cell\"],[role=\"rowheader\"]')];if(!e.length)continue;const o=e.every((e=>\"columnheader\"===e.getAttribute(\"role\"))),s=(o?\"h\":\"b\")+(a.getAttribute(\"aria-rowindex\")||a.getAttribute(\"row-index\")||\"n\"+n++);t.has(s)||t.set(s,{isH:o,cells:[]}),t.get(s).cells.push(...e.map(f))}const a=[...t.values()],o=a.filter((e=>e.isH)).pop(),s=a.filter((e=>!e.isH)).map((e=>e.cells));return s.length?o?[o.cells,...s]:s:null}const w=/^\\d{3,6}$/;function $(e){const s=function(e){const n=[...t.map((e=>e.syn)),a.date.syn,a.store.syn].flat();let o=0,s=-1;for(let t=0;t<Math.min(e.length,15);t++){const a=e[t].filter((e=>n.includes(l(e)))).length;a>s&&(o=t,s=a)}return o}(e),i=e[s].map(((e,t)=>String(e||\"\").trim()||`Column ${t+1}`)),r=e.slice(s+1).filter((e=>e.filter((e=>\"\"!==String(e).trim())).length>1)),d=function(e){const n=[[\"date\",a.date.syn],[\"store\",a.store.syn],...t.map((e=>[e.key,e.syn]))],o=e.map(l),s=new Set,i={};for(const e of[1,2])for(const[t,a]of n){if(null!=i[t]&&i[t]>=0)continue;let n=-1;for(const t of a)if(n=o.findIndex(((n,a)=>!s.has(a)&&(1===e?n===t:t.length>=4&&n.includes(t)))),n>=0)break;i[t]=n,n>=0&&s.add(n)}return i}(i);let c=d.store;const p=e=>r.length?r.filter((t=>w.test(String(t[e]||\"\").trim()))).length/r.length:0;c<0&&(c=i.findIndex(((e,t)=>p(t)>=.6)));const u=c>=0&&p(c)>=.6,g={};for(const e of r){const t=c>=0?String(e[c]||\"\").trim():\"This store\";!t||u&&!w.test(t)||/^(grand\\s*)?totals?\\b|^group\\b/i.test(t)||(g[t]=e)}const f=e=>Object.keys(d).find((t=>d[t]===e&&n[t]))||null,b=[];i.forEach(((e,t)=>{if(t===c||t===d.date)return;const n=Object.values(g).map((e=>o(e[t])));n.length&&n.filter((e=>null!=e)).length>=.5*n.length&&b.push({id:e,label:e,key:f(t),j:t})}));const h={};for(const[e,t]of Object.entries(g)){h[e]={};for(const n of b)h[e][n.id]=o(t[n.j])}const y=e=>b.find((t=>t.key===e)),v=y(\"sales\"),m=y(\"py_sales\"),x=y(\"py_eod\");if(v&&m&&!y(\"pcya\")){b.push({id:\"PCYA (calc)\",label:\"vs last year\",key:\"pcya\",derived:!0});for(const e of Object.values(h))e[\"PCYA (calc)\"]=null!=e[v.id]&&e[m.id]?(e[v.id]-e[m.id])/e[m.id]*100:null}if(v&&m&&x){b.push({id:\"Projected EOD\",label:\"Projected EOD\",key:\"proj_eod\",derived:!0});for(const e of Object.values(h))e[\"Projected EOD\"]=null!=e[v.id]&&e[m.id]&&null!=e[x.id]?e[v.id]*e[x.id]/e[m.id]:null}return{headers:i,cols:b,data:h,sig:i.join(\"|\")}}const S=\"pwrLive.v1\",j={snaps:[],cols:[],checkedAt:null,lastChangeAt:{},pick:0,interval:15,sort:null,sortDir:-1,metric:null,mini:!1,err:\"\"};try{const e=JSON.parse(sessionStorage.getItem(S)||\"null\");e&&e.path===location.pathname&&Date.now()-e.snaps[e.snaps.length-1].t<72e5&&Object.assign(j,{snaps:e.snaps,cols:e.cols,lastChangeAt:e.lastChangeAt||{}})}catch(e){}const A=()=>{try{sessionStorage.setItem(S,JSON.stringify({path:location.pathname,snaps:j.snaps.slice(-720),cols:j.cols,lastChangeAt:j.lastChangeAt}))}catch(e){}};function C(){let e;try{e=function(){const e=[];for(const t of function(){const e=[document];for(const t of document.querySelectorAll(\"iframe,frame\"))try{t.contentDocument&&e.push(t.contentDocument)}catch(e){}return e}()){for(const n of t.querySelectorAll(u)){if(!g(n)||n.parentElement&&n.parentElement.closest(u))continue;const t=[...n.querySelectorAll(\"table\")].filter((e=>g(e)&&!(e.parentElement.closest(\"table\")&&n.contains(e.parentElement.closest(\"table\"))))),a=t.length?x(t):k(n);a&&a.length>1&&e.push(a)}const n=[...t.querySelectorAll(\"table\")].filter((e=>g(e)&&!e.closest(u)&&!e.parentElement.closest(\"table\")));for(let t=0;t<n.length;t++){const a=n[t],o=[...a.rows],s=o.length&&o.every(h),l=n[t+1];if(s&&l&&![...l.rows].some(h)){const n=x([a,l]);n&&n.length>1&&e.push(n),t++;continue}const i=x([a]);i&&i.length>1&&e.push(i)}}return e.map((e=>({grid:e,parsed:$(e)}))).filter((e=>e.parsed.cols.length&&Object.keys(e.parsed.data).length))}()}catch(e){return j.err=\"Couldn't read the page: \"+e.message,void U()}if(j.found=e,j.checkedAt=Date.now(),!e.length)return j.err=\"No report table found on this page. Open Real Time Sales (or another PWR report with a table) and tap PWR Live again.\",void U();j.err=\"\";const t=e.map(((e,t)=>({i:t,s:10*e.parsed.cols.filter((e=>e.key)).length+Object.keys(e.parsed.data).length}))).sort(((e,t)=>t.s-e.s)),n=e[j.pick]?j.pick:t[0].i;j.pick=n;const a=e[n].parsed;j.sig&&j.sig!==a.sig&&(j.snaps=[],j.lastChangeAt={}),j.sig=a.sig,j.cols=a.cols.map((({id:e,label:t,key:n,derived:a})=>({id:e,label:t,key:n,derived:a})));const o=j.snaps[j.snaps.length-1];if(!o||JSON.stringify(o.data)!==JSON.stringify(a.data)){for(const e of Object.keys(a.data))o&&JSON.stringify(o.data[e])===JSON.stringify(a.data[e])||(j.lastChangeAt[e]=j.checkedAt);j.snaps.push({t:j.checkedAt,data:a.data}),j.snaps.length>720&&j.snaps.splice(0,j.snaps.length-720),A()}j.metric&&j.cols.some((e=>e.id===j.metric))||(j.metric=(j.cols.find((e=>\"pcya\"===e.key))||j.cols.find((e=>\"sales\"===e.key))||j.cols[0]).id),U()}const M=e=>j.cols.find((t=>t.key===e)),_=()=>j.snaps[j.snaps.length-1];function O(e){const t=_();if(!t)return null;const n=t.t-6e4*e;let a=null;for(const e of j.snaps){if(!(e.t<=n))break;a=e}if(a)return a;const o=j.snaps[0];return t.t-o.t>=6e5?o:null}const L=(e,t)=>{let n=0,a=0;for(const o of Object.values(e.data))null!=o[t]&&(n+=o[t],a++);return a?n:null};function z(e,t){return null!=t&&isFinite(t)?e.key&&n[e.key]?s(e.key,t,!0):\"proj_eod\"===e.key?s(\"sales\",t,!0):/%|pct|percent/i.test(e.label)?t.toFixed(1)+\"%\":/sales|\\$|dollar|revenue/i.test(e.label)?s(\"sales\",t,!0):Math.abs(t)>=100?Math.round(t).toLocaleString():(Math.round(100*t)/100).toString():\"\\u2013\"}const E=e=>s(\"sales\",e,!0),F=e=>new Date(e).toLocaleTimeString([],{hour:\"numeric\",minute:\"2-digit\"}),D=e=>{const t=Math.round((Date.now()-e)/6e4);return t<1?\"just now\":1===t?\"1 min ago\":`${t} min ago`};function T(e){const t=M(\"sales\"),n=M(\"py_sales\"),a=_(),o=O(d);if(!t||!a||!o)return null;const s=(t,n)=>null==e?L(t,n):t.data[e]?.[n],l=s(a,t.id)-s(o,t.id),i=n?s(a,n.id)-s(o,n.id):null;return isFinite(l)?{mins:Math.round((a.t-o.t)/6e4),ds:l,dp:i,pct:i?(l-i)/Math.abs(i)*100:null}:null}const P=document.createElement(\"div\");P.setAttribute(\"data-pwr-live\",\"\"),P.style.cssText=\"all:initial;position:fixed;z-index:2147483000;\";const R=P.attachShadow({mode:\"open\"}),N='\\n:host { --bg:#ffffff; --bg2:#f1f4f7; --line:#d8dee5; --ink:#111820; --ink2:#4a5663; --ink3:#6f7b88; --acc:#1b5c9e;\\n--good:#0a7d0a; --goodbg:#e2f4e2; --warn:#8a5d00; --warnbg:#fdf0d0; --bad:#b02c2c; --badbg:#fbe3e3; }\\n@media (prefers-color-scheme: dark) { :host { --bg:#1a2027; --bg2:#232b34; --line:#36414d; --ink:#eef2f6; --ink2:#b4bfca; --ink3:#8794a2; --acc:#6aa7e6;\\n--good:#5bd35b; --goodbg:#163a1a; --warn:#f5c04a; --warnbg:#3d3214; --bad:#f08080; --badbg:#432022; } }\\n* { box-sizing: border-box; }\\n.panel { position: fixed; top: 10px; right: 10px; bottom: 10px; width: min(440px, calc(100vw - 20px)); background: var(--bg); color: var(--ink);\\nborder: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 40px rgba(0,0,0,.25); display: flex; flex-direction: column;\\nfont: 13px/1.45 system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif; overflow: hidden; }\\n@media (max-width: 700px) { .panel { top: auto; left: 0; right: 0; bottom: 0; width: auto; height: 72vh; border-radius: 14px 14px 0 0; padding-bottom: env(safe-area-inset-bottom, 0px); } }\\n.head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }\\n.title { font-weight: 700; font-size: 15px; letter-spacing: .01em; }\\n.sub { color: var(--ink3); font-size: 11.5px; }\\n.grow { flex: 1; min-width: 0; }\\nbutton, select { font: inherit; color: inherit; }\\n.ib { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; min-width: 32px; height: 32px; cursor: pointer; font-size: 16px; line-height: 1; }\\n.btn { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 6px 10px; cursor: pointer; font-size: 12.5px; font-weight: 600; }\\n.btn:focus-visible, .ib:focus-visible, select:focus-visible, th:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px; }\\nselect { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 5px 6px; font-size: 12.5px; max-width: 100%; }\\n.body { overflow: auto; padding: 10px 12px 14px; display: flex; flex-direction: column; gap: 12px; flex: 1; }\\n.ro { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--ink2); background: var(--bg2); border-radius: 8px; padding: 6px 8px; flex-wrap: wrap; }\\n.kpis { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; }\\n.kpi { background: var(--bg2); border-radius: 10px; padding: 8px 10px; min-width: 0; }\\n.kpi .l { color: var(--ink2); font-size: 11.5px; }\\n.kpi .v { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }\\n.kpi .n { color: var(--ink3); font-size: 11.5px; }\\n.up { color: var(--good); } .down { color: var(--bad); }\\nh3 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink3); }\\n.alerts { display: flex; flex-direction: column; gap: 6px; }\\n.al { border-radius: 8px; padding: 6px 8px 6px 28px; position: relative; font-size: 12.5px; }\\n.al::before { position: absolute; left: 9px; top: 6px; font-weight: 700; font-family: ui-monospace, monospace; }\\n.al.bad { background: var(--badbg); } .al.bad::before { content: \"\\u2715\"; color: var(--bad); }\\n.al.warn { background: var(--warnbg); } .al.warn::before { content: \"!\"; color: var(--warn); }\\n.al.good { background: var(--goodbg); } .al.good::before { content: \"\\u2713\"; color: var(--good); }\\n.muted { color: var(--ink3); }\\n.scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }\\ntable { border-collapse: collapse; width: 100%; font-size: 12.5px; font-variant-numeric: tabular-nums; }\\nth, td { padding: 6px 8px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--line); }\\nth { font-size: 11px; color: var(--ink2); font-weight: 600; cursor: pointer; background: var(--bg2); vertical-align: bottom; }\\nth:first-child, td:first-child { text-align: left; position: sticky; left: 0; background: var(--bg); }\\nth:first-child { background: var(--bg2); }\\ntr:last-child td { border-bottom: 0; }\\ntd.good { background: var(--goodbg); } td.warn { background: var(--warnbg); } td.bad { background: var(--badbg); color: var(--bad); }\\n.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }\\n.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }\\nsvg { display: block; width: 100%; }\\n.legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11.5px; color: var(--ink2); margin-top: 4px; }\\n.legend i { display: inline-block; width: 14px; height: 2px; vertical-align: 3px; margin-right: 5px; }\\n.tip { position: absolute; pointer-events: none; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font-size: 11.5px; box-shadow: 0 6px 18px rgba(0,0,0,.18); }\\n.tip div { display: flex; justify-content: space-between; gap: 10px; }\\n.mini { position: fixed; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); background: var(--acc); color: #fff; border: 0; border-radius: 999px;\\npadding: 10px 14px; font: 600 13px system-ui, sans-serif; box-shadow: 0 8px 24px rgba(0,0,0,.3); cursor: pointer; }\\n';try{const e=new CSSStyleSheet;e.replaceSync(N),R.adoptedStyleSheets=[e]}catch(e){const t=document.createElement(\"style\");t.textContent=N,R.append(t)}function W(e,t,...n){const a=document.createElement(e);if(t)for(const[e,n]of Object.entries(t))null!=n&&!1!==n&&(\"class\"===e?a.className=n:e.startsWith(\"on\")?a.addEventListener(e.slice(2),n):a.setAttribute(e,n));for(const e of n.flat())null!=e&&a.append(e.nodeType?e:document.createTextNode(String(e)));return a}const I=\"http://www.w3.org/2000/svg\";function q(e,t,...n){const a=document.createElementNS(I,e);for(const[e,n]of Object.entries(t||{}))a.setAttribute(e,n);for(const e of n)a.append(e);return a}const J=W(\"div\",{class:\"panel\",role:\"dialog\",\"aria-label\":\"PWR Live\"}),Y=W(\"button\",{class:\"mini\",type:\"button\",hidden:\"\"});Y.style.display=\"none\",R.append(J,Y),document.documentElement.append(P);const B={},H=e=>B[e]||(B[e]=r[Object.keys(B).length%r.length]);function U(){const e=_(),t=M(\"sales\"),a=M(\"py_sales\"),o=M(\"pcya\"),l=M(\"proj_eod\"),r=T(null);if(j.mini){const n=e&&t&&a?(L(e,t.id)-L(e,a.id))/L(e,a.id)*100:null;return void(Y.textContent=\"PWR Live\"+(null!=n&&isFinite(n)?` ${n>=0?\"\\u25b2\":\"\\u25bc\"} ${Math.abs(n).toFixed(1)}%`:\"\")+(j.alertCount?` \\xb7 ${j.alertCount} alert${1===j.alertCount?\"\":\"s\"}`:\"\"))}const u=J.querySelector(\".body\"),g=u?u.scrollTop:0,f=J.querySelector(\".scroll\"),b=f?f.scrollLeft:0;J.replaceChildren(),J.append(W(\"div\",{class:\"head\"},W(\"div\",{class:\"grow\"},W(\"div\",{class:\"title\"},\"PWR Live\"),W(\"div\",{class:\"sub\"},j.checkedAt?`Checked ${new Date(j.checkedAt).toLocaleTimeString()} \\xb7 watching since ${j.snaps[0]?F(j.snaps[0].t):\"now\"}`:\"Reading the page\\u2026\")),W(\"button\",{class:\"ib\",type:\"button\",title:\"Minimize\",\"aria-label\":\"Minimize\",onclick:()=>{j.mini=!0,J.style.display=\"none\",Y.style.display=\"\",Y.removeAttribute(\"hidden\"),U()}},\"\\u2013\"),W(\"button\",{class:\"ib\",type:\"button\",title:\"Close\",\"aria-label\":\"Close\",onclick:()=>Z.close()},\"\\xd7\")));const h=W(\"div\",{class:\"body\"});if(J.append(h),h.append(W(\"div\",{class:\"ro\"},W(\"b\",null,\"Read-only.\"),\"Reads this page; never clicks, changes, or sends anything. Checks every\",W(\"select\",{\"aria-label\":\"Check interval\",onchange:e=>{j.interval=+e.target.value,Q()}},[5,15,30,60].map((e=>W(\"option\",{value:e,selected:e===j.interval?\"\":null},e<60?`${e} sec`:\"1 min\")))))),j.err&&h.append(W(\"div\",{class:\"al warn\"},j.err)),!e)return;const y=W(\"div\",{class:\"kpis\"});if(t){const n=L(e,t.id),o=a?L(e,a.id):null,s=o?(n-o)/o*100:null;y.append(W(\"div\",{class:\"kpi\"},W(\"div\",{class:\"l\"},\"Sales so far\"),W(\"div\",{class:\"v\"},E(n)),W(\"div\",{class:\"n\"},null!=s?W(\"span\",{class:s>=0?\"up\":\"down\"},`${s>=0?\"\\u25b2\":\"\\u25bc\"} ${Math.abs(s).toFixed(1)}% vs last year`):`${Object.keys(e.data).length} stores`)))}if(l&&y.append(W(\"div\",{class:\"kpi\"},W(\"div\",{class:\"l\"},\"Projected end of day\"),W(\"div\",{class:\"v\"},E(L(e,l.id))),W(\"div\",{class:\"n\"},M(\"py_eod\")?`Last year: ${E(L(e,M(\"py_eod\").id))}`:\"\"))),t&&y.append(W(\"div\",{class:\"kpi\"},W(\"div\",{class:\"l\"},`Last ${r?r.mins:d} min`),W(\"div\",{class:\"v\"},r?E(r.ds):\"\\u2026\"),W(\"div\",{class:\"n\"},r?null!=r.pct?W(\"span\",{class:r.pct>=0?\"up\":\"down\"},`${r.pct>=0?\"\\u25b2\":\"\\u25bc\"} ${Math.abs(r.pct).toFixed(0)}% vs ${E(r.dp)} last year`):\"\":\"Pace appears after 10 min of watching (keep this open).\"))),o&&!t){const t=Object.values(e.data).map((e=>e[o.id])).filter((e=>null!=e));y.append(W(\"div\",{class:\"kpi\"},W(\"div\",{class:\"l\"},o.label),W(\"div\",{class:\"v\"},(t.reduce(((e,t)=>e+t),0)/t.length).toFixed(1)+\"%\"),W(\"div\",{class:\"n\"},\"average of stores\")))}y.append(W(\"div\",{class:\"kpi\"},W(\"div\",{class:\"l\"},\"Last change seen\"),W(\"div\",{class:\"v\"},F(e.t)),W(\"div\",{class:\"n\"},D(e.t)))),h.append(y);const v=function(){const e=[],t=_();if(!t)return e;const a=Object.keys(t.data),o=M(\"pcya\");if(o)for(const n of a){const a=t.data[n][o.id];null!=a&&a<0&&e.push({sev:\"bad\",text:`${n} is ${Math.abs(a).toFixed(1)}% behind last year so far today.`})}for(const t of a){const n=T(t);n&&n.dp>0&&null!=n.pct&&n.pct<=-15&&e.push({sev:\"warn\",text:`${t} slowed down: ${E(n.ds)} in the last ${n.mins} min vs ${E(n.dp)} at this time last year (${n.pct.toFixed(0)}%).`}),n&&n.dp>0&&null!=n.pct&&n.pct>=25&&e.push({sev:\"good\",text:`${t} is surging: ${E(n.ds)} in the last ${n.mins} min vs ${E(n.dp)} last year (+${n.pct.toFixed(0)}%).`})}for(const o of j.cols)if(o.key&&n[o.key]?.dir&&null!=i[o.key]&&\"pcya\"!==o.key){for(const l of a){const a=t.data[l][o.id];\"bad\"===p(o.key,a)&&e.push({sev:\"bad\",text:`${l} ${o.label}: ${z(o,a)} (goal ${\"up\"===n[o.key].dir?\"\\u2265\":\"\\u2264\"} ${s(o.key,i[o.key],!0)}).`})}if(\"min\"===n[o.key].unit){const n=O(15);if(n)for(const l of a){const a=n.data[l]?.[o.id],i=t.data[l][o.id];null!=a&&null!=i&&i-a>=Math.max(.1*a,\"make_time\"===o.key?.25:1)&&e.push({sev:\"warn\",text:`${l} ${o.label} up ${s(o.key,i-a,!0)} in ${Math.round((t.t-n.t)/6e4)} min (now ${z(o,i)}).`})}}}const l=t.t-j.snaps[0].t,r=a.filter((e=>t.t-(j.lastChangeAt[e]||0)<6e4*c)).length;if(l>=6e4*c&&r)for(const n of a){const a=j.lastChangeAt[n]||j.snaps[0].t;t.t-a>=6e4*c&&e.push({sev:\"warn\",text:`No new numbers from ${n} since ${F(a)}. The store may not be reporting.`})}const d={bad:0,warn:1,good:2};return e.sort(((e,t)=>d[e.sev]-d[t.sev]))}();j.alertCount=v.filter((e=>\"good\"!==e.sev)).length;const m=W(\"div\",null,W(\"h3\",null,\"Needs attention\")),x=W(\"div\",{class:\"alerts\"});v.length||x.append(W(\"div\",{class:\"muted\"},\"Nothing off right now.\"));for(const e of v.slice(0,8))x.append(W(\"div\",{class:\"al \"+e.sev},e.text));v.length>8&&x.append(W(\"div\",{class:\"muted\"},`+ ${v.length-8} more`)),m.append(x),h.append(m);const k=[...j.cols],w=t?{id:\"__pace\",label:`Last ${d} min vs LY`}:null,$=w?[k[0],w,...k.slice(1)].filter(Boolean):k,S=Object.keys(e.data),P=(t,n)=>\"__pace\"===n.id?T(t)?.pct??null:e.data[t][n.id];j.sort?S.sort(((e,t)=>{const n=P(e,j.sort),a=P(t,j.sort);return null==n?1:null==a?-1:(n-a)*j.sortDir})):S.sort(((e,t)=>e.localeCompare(t,void 0,{numeric:!0})));const R=e=>{j.sort===e?j.sortDir*=-1:(j.sort=e,j.sortDir=-1),U()},N=W(\"table\",null,W(\"thead\",null,W(\"tr\",null,W(\"th\",{tabindex:\"0\",onclick:()=>{j.sort=null,U()}},\"Store\"),$.map((e=>W(\"th\",{tabindex:\"0\",onclick:()=>R(e.id),onkeydown:t=>{\"Enter\"===t.key&&R(e.id)}},e.label+(j.sort===e.id?j.sortDir>0?\" \\u2191\":\" \\u2193\":\"\")))))),W(\"tbody\",null,S.map((t=>W(\"tr\",null,W(\"td\",null,W(\"span\",{class:\"dot\",style:`background:${H(t)}`}),t),$.map((n=>{if(\"__pace\"===n.id){if(e.t-(j.lastChangeAt[t]||e.t)>=6e4*c)return W(\"td\",{class:\"warn\"},\"no data\");const n=T(t);return W(\"td\",{class:n&&null!=n.pct?n.pct<=-15?\"bad\":n.pct>=0?\"good\":\"\":\"\"},n?null!=n.pct?`${n.pct>=0?\"+\":\"\"}${n.pct.toFixed(0)}%`:E(n.ds):\"\\u2026\")}const a=e.data[t][n.id];return W(\"td\",{class:(n.key?\"pcya\"===n.key?null==a?null:a>=0?\"good\":\"bad\":p(n.key,a):null)||\"\"},z(n,a))}))))))),I=W(\"div\",{class:\"scroll\"},N);h.append(W(\"div\",null,W(\"h3\",null,\"Stores\"),I));const B=W(\"div\",null,W(\"div\",{class:\"row\",style:\"justify-content:space-between;margin-bottom:6px\"},W(\"h3\",{style:\"margin:0\"},\"Since you started watching\"),W(\"select\",{\"aria-label\":\"Metric\",onchange:e=>{j.metric=e.target.value,U()}},j.cols.map((e=>W(\"option\",{value:e.id,selected:e.id===j.metric?\"\":null},e.label))))));B.append(function(){const e=W(\"div\",{style:\"position:relative\"}),t=j.cols.find((e=>e.id===j.metric)),a=j.snaps;if(!t||a.length<2)return e.append(W(\"div\",{class:\"muted\"},\"The chart fills in as the numbers change.\")),e;const o=Object.keys(_().data).slice(0,8),s=400,l=52,r=a[0].t,d=a[a.length-1].t,c=[];for(const e of a)for(const n of o){const a=e.data[n]?.[t.id];null!=a&&c.push(a)}const p=t.key&&null!=i[t.key]&&n[t.key].dir?i[t.key]:null;if(null!=p&&c.push(p),!c.length)return e.append(W(\"div\",{class:\"muted\"},\"No numbers in this column yet.\")),e;let u=Math.min(...c),g=Math.max(...c);const f=.1*(g-u)||.1*Math.abs(g)||1;u-=f,g+=f;const b=e=>l+340*(d===r?0:(e-r)/(d-r)),h=e=>8+142*(1-(e-u)/(g-u)),y=q(\"svg\",{viewBox:\"0 0 400 170\",role:\"img\",\"aria-label\":`${t.label} since ${F(r)}`}),v=getComputedStyle(J).getPropertyValue(\"--ink3\")||\"#6f7b88\",m=getComputedStyle(J).getPropertyValue(\"--line\")||\"#ddd\";for(let e=0;e<=3;e++){const n=u+(g-u)*e/3;y.append(q(\"line\",{x1:l,x2:392,y1:h(n),y2:h(n),stroke:m,\"stroke-width\":1}));const a=q(\"text\",{x:46,y:h(n)+4,\"text-anchor\":\"end\",\"font-size\":10,fill:v});a.textContent=z(t,n),y.append(a)}[r,d].forEach(((e,t)=>{const n=q(\"text\",{x:b(e),y:166,\"text-anchor\":t?\"end\":\"start\",\"font-size\":10,fill:v});n.textContent=F(e),y.append(n)})),null!=p&&y.append(q(\"line\",{x1:l,x2:392,y1:h(p),y2:h(p),stroke:v,\"stroke-dasharray\":\"4 3\",\"stroke-width\":1.2}));for(const e of o){let n=\"\";for(const o of a){const a=o.data[e]?.[t.id];null!=a&&(n+=`${n?\"L\":\"M\"}${b(o.t).toFixed(1)},${h(a).toFixed(1)}`)}n&&y.append(q(\"path\",{d:n,fill:\"none\",stroke:H(e),\"stroke-width\":2,\"stroke-linejoin\":\"round\",\"stroke-linecap\":\"round\"}))}const x=q(\"line\",{y1:8,y2:150,stroke:v,\"stroke-width\":1,visibility:\"hidden\"});y.append(x),e.append(y);const k=W(\"div\",{class:\"tip\",hidden:\"\"});k.style.display=\"none\",e.append(k),y.addEventListener(\"pointermove\",(e=>{const n=y.getBoundingClientRect(),i=r+((e.clientX-n.left)/n.width*s-l)/340*(d-r);let c=a[0];for(const e of a)Math.abs(e.t-i)<Math.abs(c.t-i)&&(c=e);x.setAttribute(\"x1\",b(c.t)),x.setAttribute(\"x2\",b(c.t)),x.setAttribute(\"visibility\",\"visible\"),k.replaceChildren(W(\"div\",{class:\"muted\"},new Date(c.t).toLocaleTimeString()),...o.map((e=>({st:e,v:c.data[e]?.[t.id]}))).sort(((e,t)=>(t.v??-1/0)-(e.v??-1/0))).map((({st:e,v:n})=>W(\"div\",null,W(\"span\",null,W(\"span\",{class:\"dot\",style:`background:${H(e)}`}),e),W(\"b\",null,z(t,n)))))),k.style.display=\"\",k.style.top=\"0px\";const p=b(c.t)/s*n.width;k.style.left=(p>n.width/2?Math.max(0,p-k.offsetWidth-10):p+10)+\"px\"})),y.addEventListener(\"pointerleave\",(()=>{x.setAttribute(\"visibility\",\"hidden\"),k.style.display=\"none\"}));const w=W(\"div\",{class:\"legend\"},o.map((e=>W(\"span\",null,W(\"i\",{style:`background:${H(e)}`}),e))));return null!=p&&w.append(W(\"span\",null,W(\"i\",{style:`border-top:2px dashed ${v};height:0`}),\"Goal\")),e.append(w),e}()),h.append(B);const V=W(\"div\",{class:\"row\"},W(\"button\",{class:\"btn\",type:\"button\",onclick:G},\"Copy table for the analyzer\"),j.found&&j.found.length>1?W(\"select\",{\"aria-label\":\"Table on this page\",onchange:e=>{j.pick=+e.target.value,C()}},j.found.map(((e,t)=>W(\"option\",{value:t,selected:t===j.pick?\"\":null},`Table ${t+1}: ${e.parsed.headers.slice(0,3).join(\", \")}`)))):null,W(\"button\",{class:\"btn\",type:\"button\",onclick:()=>{j.snaps=[],j.lastChangeAt={},A(),C()}},\"Restart history\"));h.append(V),j.copied&&h.append(W(\"div\",{class:\"muted\"},j.copied)),h.append(W(\"div\",{class:\"muted\"},\"Numbers update when the PWR page updates. If the table isn't refreshing on its own, tap the page's refresh button; this panel picks up the new numbers.\")),h.scrollTop=g,I.scrollLeft=b}function G(){const e=_();if(!e)return;const t=[[\"Store\",...j.cols.map((e=>e.label))].join(\"\\t\")];for(const n of Object.keys(e.data))t.push([n,...j.cols.map((t=>{const a=e.data[n][t.id];return null==a?\"\":String(Math.round(100*a)/100)}))].join(\"\\t\"));const n=t.join(\"\\n\"),a=e=>{j.copied=e,U(),setTimeout((()=>{j.copied=\"\",U()}),6e3)};try{navigator.clipboard.writeText(n).then((()=>a(\"Copied. Paste it into the PWR Analyzer (Paste from spreadsheet).\")),(()=>a(\"Your browser blocked copying. Use the PWR page's own export instead.\")))}catch(e){a(\"Your browser blocked copying. Use the PWR page's own export instead.\")}}let V=null,X=null,K=null;function Q(){clearInterval(V),V=setInterval(C,1e3*j.interval)}const Z={show(){j.mini=!1,J.style.display=\"\",Y.style.display=\"none\",C()},close(){clearInterval(V),X&&X.disconnect(),P.remove(),delete window.__pwrLive}};Y.addEventListener(\"click\",(()=>Z.show())),window.__pwrLive=Z;try{X=new MutationObserver((e=>{e.every((e=>P.contains(e.target)||e.target===P))||(clearTimeout(K),K=setTimeout(C,1200))})),X.observe(document.body,{childList:!0,subtree:!0,characterData:!0})}catch(e){}C(),Q()}(__TARGETS__);";/*BOOKMARKLET:END*/
+// Only "%" (and "#") must be escaped in a javascript: URL; full encoding would make it 50% longer.
+const bookmarkCode = () => "javascript:" + LIVE_CODE.replace("__TARGETS__", JSON.stringify(S.targets)).replace(/%/g, "%25").replace(/#/g, "%23").replace(/\n/g, "%0A");
+function refreshBookmark() { $("bmLink").setAttribute("href", bookmarkCode()); }
+$("bmLink").addEventListener("click", e => { e.preventDefault(); $("bmNote").textContent = "Drag this button to your bookmarks bar instead of clicking it here."; });
+$("btnCopyBm").onclick = () => {
+  const code = bookmarkCode(), fb = $("bmFallback");
+  const fallback = () => { fb.hidden = false; fb.value = code; fb.focus(); fb.select(); $("bmNote").textContent = "Copy the selected code from the box (long-press, Copy)."; };
+  try { navigator.clipboard.writeText(code).then(() => { fb.hidden = true; $("bmNote").textContent = `Copied (${Math.round(code.length / 1024)} KB). Paste it as the bookmark's URL.`; }, fallback); }
+  catch { fallback(); }
 };
-$("liveTable").onchange = e => liveLoadTable(+e.target.value);
-$("btnLiveDownload").onclick = async () => {
-  try {
-    const res = await api("/api/download");
-    const name = decodeURIComponent(res.headers.get("X-Filename") || "export.csv");
-    handleFile(new File([await res.blob()], name));
-  } catch (e) { showMessage("Couldn't load the export: " + e.message, true); }
-};
-$("btnLiveLock").onclick = async () => { try { await api("/api/lock", { locked: !LIVE.status.locked }); liveRefresh(); } catch (e) { showMessage(e.message, true); } };
-if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) { liveRefresh().then(() => { if (LIVE.on) setInterval(liveRefresh, 3000); }); }
 
 /* ---------- Wiring ---------- */
 $("btnImport").onclick = () => $("fileInput").click();
@@ -1226,7 +1209,7 @@ $("presetSeg").onclick = e => { const b = e.target.closest("button"); if (!b) re
 $("granSeg").onclick = e => { const b = e.target.closest("button"); if (!b) return; S.gran = b.dataset.gran; renderAll(); };
 $("modeSeg").onclick = e => { const b = e.target.closest("button"); if (!b) return; S.mode = b.dataset.mode; renderFilters(); renderTrend(); };
 $("metricSelect").onchange = e => { S.metric = e.target.value; renderTiles(); renderTrend(); renderDow(); };
-$("btnResetTargets").onclick = () => { S.targets = defaultTargets(); store.set("pwr.targets", S.targets); renderAll(); };
+$("btnResetTargets").onclick = () => { S.targets = defaultTargets(); store.set("pwr.targets", S.targets); renderAll(); refreshBookmark(); };
 
 let dragDepth = 0;
 addEventListener("dragenter", e => { if ([...(e.dataTransfer?.types || [])].includes("Files")) { dragDepth++; $("dropHint").hidden = false; } });
@@ -1242,6 +1225,7 @@ matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => { 
 
 function defaultTargets() { return Object.fromEntries(METRICS.filter(m => m.target != null).map(m => [m.key, m.target])); }
 S.targets = { ...defaultTargets(), ...store.get("pwr.targets", {}) };
+refreshBookmark();
 loadGrid(parseDelimited(sampleCsv()), "Sample data", true);
 </script>
 </body>
