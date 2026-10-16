@@ -155,7 +155,12 @@ function scan() {
       const g = fromTables([t]); if (g && g.length > 1) found.push(g);
     }
   }
-  const parsed = found.map(parseGrid).filter(p => p.cols.length && Object.keys(p.data).length);
+  let parsed = found.map(parseGrid).filter(p => p.cols.length && Object.keys(p.data).length);
+  // If no table gave recognizable columns, read the screen the way a person does.
+  if (!parsed.some(p => p.cols.some(c => c.key))) {
+    const vis = docs().map(readVisual).filter(Boolean);
+    if (vis.length) parsed = vis;
+  }
   if (!parsed.length) for (const d of docs()) { const p = readTiles(d); if (p) parsed.push(p); }
   return parsed;
 }
@@ -207,6 +212,63 @@ function parseGrid(grid) {
   const raw = {};
   for (const [st, r] of Object.entries(recs)) { data[st] = {}; raw[st] = {}; for (const c of cols) { data[st][c.id] = parseNumber(r[c.j]); raw[st][c.id] = String(r[c.j]).trim(); } }
   return { headers, cols, data, raw };
+}
+
+// Reads any store table by position on screen, however the page builds it: finds a column of
+// store numbers, takes the numbers on the same line as each, and names each number by the header
+// label directly above its column.
+function readVisual(d) {
+  if (!d.body) return null;
+  const skipSel = "script,style,svg,canvas,select,option,noscript,[data-pwr-live]";
+  const leaves = [];
+  for (const el of d.body.querySelectorAll("*")) {
+    if ([...el.children].some(c => (c.textContent || "").trim())) continue;
+    const text = cellText(el);
+    if (!text || text.length > 60 || el.closest(skipSel)) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width < 1 || r.height < 1) continue;
+    leaves.push({ el, text, r, cy: r.top + r.height / 2 });
+  }
+  // Column geometry comes from the cell, not the text: short text like "# DE" is narrower than
+  // its column, so use the nearest block-level box around inline text.
+  const view = d.defaultView;
+  for (const x of leaves) {
+    let b = x.el;
+    while (b.parentElement && b.parentElement !== d.body && /^(inline|contents)$/.test(view.getComputedStyle(b).display)) b = b.parentElement;
+    const br = b === x.el ? x.r : b.getBoundingClientRect();
+    x.left = br.left; x.right = br.right; x.cx = br.left + br.width / 2;
+  }
+  const groups = new Map();
+  for (const x of leaves) if (/^\d{3,6}$/.test(x.text)) { const k = Math.round(x.r.left / 8); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(x); }
+  let ids = [...groups.values()].filter(g => g.length >= 3).sort((a, b) => b.length - a.length)[0];
+  if (!ids) return null;
+  const seen = new Set(); ids = ids.filter(x => !seen.has(x.text) && seen.add(x.text)); // frozen-column copies
+  const rowOf = idl => { const band = Math.max(6, idl.r.height * 0.6); return leaves.filter(x => x !== idl && x.cx > idl.r.right && Math.abs(x.cy - idl.cy) < band && parseNumber(x.text) != null); };
+  const top = Math.min(...ids.map(x => x.r.top));
+  const centers = rowOf(ids[0]).map(x => x.cx);
+  const heads = leaves.filter(x => x.r.bottom <= top + 2 && x.r.bottom >= top - 260 && parseNumber(x.text) == null && !/^group\b/i.test(x.text) &&
+    centers.filter(c => c >= x.left - 2 && c <= x.right + 2).length <= 1);
+  const labelFor = cx => {
+    const over = heads.filter(hd => hd.left - 2 <= cx && cx <= hd.right + 2).sort((a, b) => b.r.bottom - a.r.bottom);
+    if (!over.length) return null;
+    const stack = [over[0]]; let stackTop = over[0].r.top;
+    for (const hd of over.slice(1)) if (hd.r.bottom >= stackTop - 6) { stack.push(hd); stackTop = Math.min(stackTop, hd.r.top); }
+    return stack.sort((a, b) => a.r.top - b.r.top).map(x => x.text).join(" ");
+  };
+  const data = {}, raw = {}, labels = [];
+  for (const idl of ids) {
+    data[idl.text] = {}; raw[idl.text] = {};
+    for (const c of rowOf(idl).sort((a, b) => a.cx - b.cx)) {
+      const label = labelFor(c.cx) || `Column at ${Math.round(c.cx)}px`;
+      if (label in data[idl.text]) continue;
+      if (!labels.includes(label)) labels.push(label);
+      data[idl.text][label] = parseNumber(c.text); raw[idl.text][label] = c.text;
+    }
+  }
+  if (!labels.length) return null;
+  const map = autoMap(labels);
+  const keyOf = j => Object.keys(map).find(k => map[k] === j && M[k]) || null;
+  return { headers: labels, cols: labels.map((label, j) => ({ id: label, label, key: keyOf(j) })), data, raw };
 }
 
 // Tile dashboards (like Service & Labor Summary): pair each number with the label just above it
@@ -300,6 +362,7 @@ function tick() {
     for (const [st, vals] of Object.entries(p.data)) Object.assign(data[st] = data[st] || {}, vals);
     for (const [st, vals] of Object.entries(p.raw || {})) Object.assign(L.raw[st] = L.raw[st] || {}, vals);
   }
+  applyManual();
   addDerived(data);
   if (!last || JSON.stringify(last.data) !== JSON.stringify(data)) {
     for (const st of Object.keys(data)) if (!last || JSON.stringify(last.data[st]) !== JSON.stringify(data[st])) L.lastChangeAt[st] = L.checkedAt;
@@ -345,6 +408,23 @@ function pace(st) {
   const dp = py ? pick(now, py.id) - pick(old, py.id) : null;
   if (!isFinite(ds)) return null;
   return { mins: Math.round((now.t - old.t) / 60e3), ds, dp, pct: dp ? (ds - dp) / Math.abs(dp) * 100 : null };
+}
+
+// Column choices made in the panel (for example "this column is labor hours"), kept in this browser.
+let manual = {};
+try { manual = JSON.parse(localStorage.getItem("pwrLive.manual") || "{}"); } catch (e) {}
+function applyManual() {
+  for (const [key, id] of Object.entries(manual)) {
+    if (!L.cols.some(c => c.id === id)) continue;
+    for (const c of L.cols) { if (c.id === id) c.key = key; else if (c.key === key && !c.derived) c.key = null; }
+  }
+}
+function setManual(key, id) {
+  if (id) manual[key] = id; else delete manual[key];
+  try { localStorage.setItem("pwrLive.manual", JSON.stringify(manual)); } catch (e) {}
+  L.cols = L.cols.filter(c => !c.derived); // recompute derived columns
+  const last = latest(); if (last) { applyManual(); addDerived(last.data); }
+  render();
 }
 
 // SPLH goal: from the analyzer's Targets, or set right in the panel (kept in this browser).
@@ -562,7 +642,12 @@ function render() {
     spBox.append(grid, h("div", { class: "row", style: "margin-top:6px" }, h("label", { class: "muted", for: "splhGoal" }, "Goal $"),
       h("input", { id: "splhGoal", type: "number", inputmode: "decimal", step: "any", value: splhGoal ?? "", placeholder: "e.g. 85", style: "width:90px;border:1px solid var(--line);border-radius:8px;padding:5px 6px;background:var(--bg);color:var(--ink)",
         onchange: e => { splhGoal = e.target.value === "" ? null : +e.target.value; try { e.target.value === "" ? localStorage.removeItem("pwrLive.splhGoal") : localStorage.setItem("pwrLive.splhGoal", String(splhGoal)); } catch (x) {} render(); } })));
-  } else spBox.append(h("div", { class: "muted" }, "Open the Real Time Labor tab (or any PWR screen showing labor hours or SPLH). PWR Live adds the hours to today's sales and tracks SPLH live."));
+  } else spBox.append(h("div", { class: "muted" }, "Open Real Time Labor (it shows Current Labor Hours next to Today's Royalty Sales). If it still doesn't appear, pick the columns below."));
+  const numericCols = L.cols.filter(c => !c.derived);
+  const picker = (key, label) => h("div", { class: "row", style: "margin-top:6px" }, h("span", { class: "muted" }, label),
+    h("select", { "aria-label": label, onchange: e => setManual(key, e.target.value) },
+      h("option", { value: "" }, "— choose —"), numericCols.map(c => h("option", { value: c.id, selected: c.key === key ? "" : null }, c.label))));
+  if (numericCols.length) spBox.append(picker("sales", "Sales column"), picker("labor_hours", "Labor hours column"));
   body.append(spBox);
 
   // Alerts.
@@ -613,6 +698,7 @@ function render() {
     h("button", { class: "btn", type: "button", onclick: () => { L.snaps = []; L.cols = []; L.colSeen = {}; L.lastChangeAt = {}; save(); tick(); } }, "Restart history"));
   body.append(tools);
   if (L.copied) body.append(h("div", { class: "muted" }, L.copied));
+  body.append(h("div", { class: "muted" }, "Columns read: " + (L.cols.filter(c => !c.derived).map(c => c.label + (c.key ? ` (${M[c.key] ? M[c.key].label : c.key})` : "")).join(", ") || "none yet")));
   body.append(h("div", { class: "muted" }, "Numbers update when the PWR page updates. Visit other PWR tabs (Labor, Service & Labor Summary…) and their numbers are added to the board. Columns from a tab you're not on show how long ago they were read."));
   body.scrollTop = keepScroll; sc.scrollLeft = keepX;
 }
