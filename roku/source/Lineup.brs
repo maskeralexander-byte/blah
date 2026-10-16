@@ -8,7 +8,7 @@ end function
 function guideFeeds() as Object
     base = "https://raw.githubusercontent.com/matthuisman/i.mjh.nz/master/"
     return [
-        { url: base + "PlutoTV/us.xml", byId: true },
+        { url: base + "PlutoTV/us.xml", byId: true, addChannels: true },
         { url: base + "SamsungTVPlus/us.xml", byId: false },
     ]
 end function
@@ -16,7 +16,7 @@ end function
 ' Bump when the cached lineup's shape changes, so copies written by older versions are ignored
 ' (version 1.3 and earlier cached the phone's list, without fields this version relies on).
 function lineupFormat() as Integer
-    return 2
+    return 3
 end function
 
 function readLineupCache() as Dynamic
@@ -235,6 +235,7 @@ end function
 sub attachGuide(channels as Object, now as Integer, out as Object)
     until = now + 8 * 3600
     byKey = {}
+    plutoChannels = invalid
     feeds = guideFeeds()
     for i = 0 to feeds.Count() - 1
         feed = feeds[i]
@@ -244,23 +245,59 @@ sub attachGuide(channels as Object, now as Integer, out as Object)
             out.progress = "Reading guide " + (i + 1).ToStr() + " of " + feeds.Count().ToStr() + "…"
             parsed = parseXmltv(text, feed.byId, now, until)
             text = invalid
-            for each k in parsed
-                if not byKey.DoesExist(k) then byKey[k] = parsed[k]
+            for each k in parsed.programmes
+                if not byKey.DoesExist(k) then byKey[k] = parsed.programmes[k]
             end for
+            if feed.addChannels = true then plutoChannels = parsed.channels
         end if
     end for
 
     plutoRe = CreateObject("roRegex", "jmp2\.uk/plu-([0-9a-f]{24})", "")
+    havePluto = {}
     for each ch in channels
         ch.Delete("p")
         list = invalid
         mt = plutoRe.Match(ch.url)
-        if mt.Count() > 1 then list = byKey["id:" + mt[1]]
+        if mt.Count() > 1
+            havePluto[mt[1]] = true
+            list = byKey["id:" + mt[1]]
+        end if
         if list = invalid then list = byKey["name:" + normalizeName(ch.name)]
         ' Each channel gets its own copy: FormatJson refuses objects shared between channels.
         if list <> invalid then ch.p = copyProgrammes(list)
     end for
+
+    ' Every channel in Pluto TV's US guide that the playlist doesn't have yet. They use the same
+    ' jmp2.uk redirect as the playlist's own Pluto entries.
+    if plutoChannels <> invalid
+        for each id in plutoChannels
+            if not havePluto.DoesExist(id)
+                meta = plutoChannels[id]
+                ch = {
+                    name: meta.name,
+                    url: "https://jmp2.uk/plu-" + id + ".m3u8",
+                    g: categoryLabel(meta.cat),
+                    format: "hls",
+                    official: true,
+                }
+                if meta.logo <> invalid then ch.logo = meta.logo
+                list = byKey["id:" + id]
+                if list <> invalid then ch.p = copyProgrammes(list)
+                channels.Push(ch)
+            end if
+        end for
+        channels.SortBy("name", "i")
+    end if
 end sub
+
+' Pluto's programme categories, shortened for the guide menu.
+function categoryLabel(cat as Dynamic) as String
+    if cat = invalid or cat = "" then return "Entertainment"
+    map = { "News & Information": "News", "Children": "Kids", "Animated": "Animation", "Movie": "Movies",
+        "Human Interest": "Lifestyle", "Sports event": "Sports", "Sports non-event": "Sports" }
+    if map.DoesExist(cat) then return map[cat]
+    return cat
+end function
 
 function copyProgrammes(list as Object) as Object
     out = []
@@ -280,21 +317,30 @@ function normalizeName(name as String) as String
 end function
 
 ' Parses XMLTV by splitting on </programme>, so every search runs on a small string.
+' Returns { programmes: { key: [ {t, s, e, d} ] }, channels: { id: {name, logo, cat} } }.
 function parseXmltv(text as String, byId as Boolean, now as Integer, until as Integer) as Object
     out = {}
+    info = {}
+    result = { programmes: out, channels: info }
     chunks = text.Split("</programme>")
-    if chunks.Count() = 0 then return out
+    if chunks.Count() = 0 then return result
 
     names = {}
     for each chunk in chunks
         ' Channel definitions can come all at the top (Pluto) or before each channel's shows (Samsung).
-        if not byId and Instr(1, chunk, "<channel id=") > 0 then collectChannelNames(chunk, names)
+        if Instr(1, chunk, "<channel id=") > 0 then collectChannels(chunk, names, info)
         p = Instr(1, chunk, "<programme ")
         if p > 0
             head = Mid(chunk, p, Instr(p, chunk, ">") - p)
             ch = attrOf(head, "channel")
             s = xmltvTime(attrOf(head, "start"))
             e = xmltvTime(attrOf(head, "stop"))
+            ' Remember a category per channel for the guide menu (skip the generic "Series").
+            meta = info[ch]
+            if meta <> invalid and meta.cat = invalid
+                cat = unescapeXml(tagText(chunk, "category"))
+                if cat <> "" and cat <> "Series" then meta.cat = cat
+            end if
             if e > now and s < until and ch <> ""
                 key = invalid
                 if byId then key = "id:" + ch else key = names[ch]
@@ -316,17 +362,24 @@ function parseXmltv(text as String, byId as Boolean, now as Integer, until as In
             end if
         end if
     end for
-    return out
+    return result
 end function
 
-sub collectChannelNames(text as String, names as Object)
+sub collectChannels(text as String, names as Object, info as Object)
     for each part in text.Split("</channel>")
         idPos = Instr(1, part, "<channel id=" + Chr(34))
         if idPos > 0
             idStart = idPos + 13
             idEnd = Instr(idStart, part, Chr(34))
-            dn = tagText(part, "display-name")
-            if dn <> "" then names[Mid(part, idStart, idEnd - idStart)] = "name:" + normalizeName(unescapeXml(dn))
+            id = Mid(part, idStart, idEnd - idStart)
+            dn = unescapeXml(tagText(part, "display-name"))
+            if dn <> ""
+                names[id] = "name:" + normalizeName(dn)
+                meta = { name: dn }
+                logo = attrOf(part, "src")
+                if logo <> "" then meta.logo = logo
+                info[id] = meta
+            end if
         end if
     end for
 end sub
@@ -354,6 +407,8 @@ end function
 function unescapeXml(s as String) as String
     s = s.Replace("&lt;", "<").Replace("&gt;", ">").Replace("&quot;", Chr(8221)).Replace(Chr(34), Chr(8221))
     s = s.Replace("&apos;", "'").Replace("&#39;", "'")
+    ' Line breaks and tabs in descriptions become spaces, so the text stays on one JSON line.
+    s = s.Replace(Chr(13), " ").Replace(Chr(10), " ").Replace(Chr(9), " ")
     return s.Replace("&amp;", "&")
 end function
 

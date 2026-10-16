@@ -137,7 +137,7 @@
         <Timer id="toastTimer" duration="2.5" />
         <Timer id="digitsTimer" duration="1.6" />
         <Timer id="clockTimer" duration="20" repeat="true" />
-        <Timer id="searchTimer" duration="0.6" />
+        <Timer id="searchTimer" duration="0.9" />
         <Timer id="programTimer" duration="20" repeat="true" />
     </children>
 </component>

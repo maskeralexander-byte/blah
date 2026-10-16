@@ -14,7 +14,8 @@ streams**: broadcasters' own free streams and free ad-supported services such as
 | [iptv-org](https://github.com/iptv-org/iptv) | ~11,000 |
 | [Free-TV/IPTV](https://github.com/Free-TV/IPTV) | ~2,000 |
 
-Duplicates are removed. Lists refresh every 12 hours and are cached for offline start-up.
+On top of those, every channel in Pluto TV's US lineup is added from Pluto's own guide (about 250
+that the lists skip, like Law & Order, Criminal Minds, Cheers and Family Feud). Duplicates are removed. Lists refresh every 12 hours and are cached for offline start-up.
 The app opens on **English** channels (about 3,300, tagged using iptv-org's language list); everything
 else is under the **Other languages** tab. Playlists you add yourself always appear under English.
 
@@ -61,7 +62,8 @@ Guides refresh every 6 hours. Pluto channels match by channel ID; Samsung and Pl
 ## On the TV (Roku)
 
 The Roku app (`roku/`) is a standalone live TV app. It downloads the English channel list and the
-free guide feeds (Pluto TV and Samsung TV Plus, about 370 channels with listings) by itself, keeps
+free guide feeds (Pluto TV and Samsung TV Plus, about 620 channels with listings, including every
+Pluto TV US channel) by itself, keeps
 a copy, and refreshes it in the background, so it works from the Roku home screen with just the Roku
 remote:
 

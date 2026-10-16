@@ -1,11 +1,28 @@
 sub init()
-    m.top.functionName = "build"
+    m.top.functionName = "serve"
 end sub
 
-sub build()
+' Waits for filter requests and answers each one; picks up new channel lists as they arrive.
+sub serve()
+    port = CreateObject("roMessagePort")
+    m.top.ObserveField("channels", port)
+    m.top.ObserveField("filter", port)
     channels = m.top.channels
-    f = m.top.filter
     if channels = invalid then channels = []
+    while true
+        msg = Wait(0, port)
+        if Type(msg) = "roSGNodeEvent"
+            if msg.GetField() = "channels"
+                channels = msg.GetData()
+                if channels = invalid then channels = []
+            else if msg.GetField() = "filter"
+                build(channels, msg.GetData())
+            end if
+        end if
+    end while
+end sub
+
+sub build(channels as Object, f as Object)
     if f = invalid then f = { mode: "all" }
     now = CreateObject("roDateTime").AsSeconds()
     start = now - (now MOD 1800)
@@ -43,6 +60,7 @@ sub build()
                 keep = matches(ch, query, now)
             end if
             if keep then order.Push(i)
+            if mode = "search" and order.Count() >= 150 then exit for
         end for
     end if
 
@@ -79,6 +97,7 @@ sub build()
 
     m.top.rowMap = order
     m.top.startTime = start
+    if f.req <> invalid then m.top.req = f.req
     m.top.content = root
 end sub
 

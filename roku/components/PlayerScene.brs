@@ -80,6 +80,12 @@ sub init()
     m.top.SetFocus(true)
 
     print "[livetv] scene ready"
+    ' One long-running worker builds the guide grid; see GuideTask.xml.
+    m.guideReq = 0
+    m.guideTask = CreateObject("roSGNode", "GuideTask")
+    m.guideTask.ObserveField("content", "onGuideBuilt")
+    m.guideTask.control = "RUN"
+
     ' Show the saved lineup right away, then refresh it in the background.
     showStatus("", "Loading channels…")
     m.cacheTask = startLineupTask("cache", false)
@@ -151,6 +157,8 @@ sub applyFilter()
         if ch.official = true or not m.officialOnly then list.Push(ch)
     end for
     m.channels = list
+    ' Hand the guide worker its copy once per change (not once per search).
+    m.guideTask.channels = list
     found = indexOfUrl(m.currentUrl)
     if found >= 0 then m.index = found
     if m.index >= m.channels.Count() then m.index = 0
@@ -486,8 +494,7 @@ sub openSearch(query as String)
     m.keyboard.text = query
     m.searchText.text = query + " "
     m.keyboard.SetFocus(true)
-    m.filter = { mode: "search", value: query }
-    buildGuide(false)
+    runSearch()
 end sub
 
 sub onSearchTyped()
@@ -497,26 +504,34 @@ sub onSearchTyped()
 end sub
 
 sub runSearch()
-    m.filter = { mode: "search", value: m.keyboard.text }
+    query = m.keyboard.text.Trim()
+    if Len(query) < 2
+        m.rowMap = []
+        m.grid.visible = false
+        m.emptyText.text = "Type at least 2 letters."
+        m.emptyText.visible = true
+        return
+    end if
+    m.filter = { mode: "search", value: query }
     buildGuide(false)
 end sub
 
 ' Builds the grid for the current filter on a Task; focusAfter moves focus to the grid when ready.
 sub buildGuide(focusAfter as Boolean)
-    task = CreateObject("roSGNode", "GuideTask")
-    task.channels = m.channels
-    f = m.filter
+    m.guideReq = m.guideReq + 1
+    f = {}
+    f.Append(m.filter)
+    f.req = m.guideReq
     f.recents = m.recents
     f.favs = m.favs
-    task.filter = f
     m.focusGridAfterBuild = focusAfter
-    task.ObserveField("content", "onGuideBuilt")
-    task.control = "RUN"
-    m.guideTask = task
+    m.guideTask.filter = f
 end sub
 
 sub onGuideBuilt()
     task = m.guideTask
+    ' Ignore answers to requests that have since been replaced (fast typing in search).
+    if task.req <> m.guideReq then return
     m.rowMap = task.rowMap
     m.grid.contentStartTime = task.startTime
     m.grid.content = task.content

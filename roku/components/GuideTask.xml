@@ -1,13 +1,18 @@
 <?xml version="1.0" encoding="utf-8" ?>
-<!-- Builds the TimeGrid content (channels with their programmes) off the render thread. -->
+<!--
+  Long-running worker that builds the TimeGrid content off the render thread. It keeps its own copy
+  of the channel list (sent once per lineup change), so each search or menu pick only sends a small
+  filter instead of copying every channel across threads.
+-->
 <component name="GuideTask" extends="Task">
     <interface>
         <field id="channels" type="array" />
-        <!-- { mode: "all" | "fav" | "recent" | "group" | "search", value: String, recents: [urls], favs: [urls] } -->
-        <field id="filter" type="assocarray" />
+        <!-- { req, mode: "all" | "fav" | "recent" | "group" | "search", value, recents: [urls], favs: [urls] } -->
+        <field id="filter" type="assocarray" alwaysNotify="true" />
         <field id="rowMap" type="array" />
         <field id="startTime" type="integer" />
-        <field id="content" type="node" />
+        <field id="req" type="integer" />
+        <field id="content" type="node" alwaysNotify="true" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/GuideTask.brs" />
 </component>

@@ -105,10 +105,11 @@ class ChannelRepository(context: Context) {
         val disabled = disabledSources()
         val sources = allSources().filterNot { it.id in disabled }
         val englishIndex = PlaylistSource("lang-eng", "English index", ENGLISH_INDEX_URL, builtIn = true)
-        val (results, english) = coroutineScope {
+        val (results, english, pluto) = coroutineScope {
             val lists = sources.map { src -> async { loadSource(src, forceRefresh) } }
             val eng = async { loadSource(englishIndex, forceRefresh).first }
-            lists.awaitAll() to eng.await()
+            val plu = async { loadPlutoUs(forceRefresh) }
+            Triple(lists.awaitAll(), eng.await(), plu.await())
         }
         val englishUrls = english.mapTo(HashSet()) { it.url }
         val englishIds = english.mapNotNullTo(HashSet()) { it.tvgId?.let(::baseId) }
@@ -122,7 +123,37 @@ class ChannelRepository(context: Context) {
                 c.source in customNames
             c.copy(english = isEnglish, official = c.source in customNames || isOfficialStream(c.url))
         }
-        LoadResult(channels, results.mapNotNull { it.second })
+        // Pluto TV US channels the playlists don't include.
+        val havePluto = channels.mapNotNullTo(HashSet()) { PlutoChannels.idOf(it.url) }
+        val extra = pluto.filter { PlutoChannels.idOf(it.url) !in havePluto && seen.add(it.url) }
+        LoadResult((channels + extra).sortedBy { it.name.lowercase() }, results.mapNotNull { it.second })
+    }
+
+    /** Every channel in Pluto TV's US guide (cached like the playlists). */
+    private fun loadPlutoUs(forceRefresh: Boolean): List<Channel> {
+        val cache = File(cacheDir, "pluto-us.xml.gz")
+        val fresh = cache.exists() && System.currentTimeMillis() - cache.lastModified() < CACHE_MS
+        if (forceRefresh || !fresh) {
+            runCatching {
+                val conn = (URL(PlutoChannels.GUIDE_URL).openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 15_000
+                    readTimeout = 60_000
+                    setRequestProperty("User-Agent", "LiveTV/1.0")
+                }
+                try {
+                    if (conn.responseCode in 200..299) {
+                        val tmp = File(cache.path + ".part")
+                        conn.inputStream.use { input -> tmp.outputStream().use { input.copyTo(it) } }
+                        tmp.renameTo(cache)
+                    }
+                } finally {
+                    conn.disconnect()
+                }
+            }
+        }
+        if (!cache.exists()) return emptyList()
+        return runCatching { GZIPInputStream(cache.inputStream().buffered()).use { PlutoChannels.parse(it) } }
+            .getOrDefault(emptyList())
     }
 
     /** "CNN.us@HD" -> "cnn.us", so feeds of the same channel match. */
