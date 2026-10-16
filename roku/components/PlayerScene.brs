@@ -558,7 +558,12 @@ sub onProgramFocused()
     row = d.focusChannelIndex
     if row = invalid or row < 0 or row >= m.rowMap.Count() then return
     ch = m.channels[m.rowMap[row]]
-    prog = d.content
+    ' The focus details only carry indexes; look the programme up in the grid's content.
+    prog = invalid
+    rowNode = m.grid.content.GetChild(row)
+    if rowNode <> invalid and d.focusIndex <> invalid and d.focusIndex >= 0
+        prog = rowNode.GetChild(d.focusIndex)
+    end if
     m.previewChannel.text = "Ch " + (m.rowMap[row] + 1).ToStr() + "   ·   " + valueOr(ch.name, "")
     logo = ""
     if ch.logo <> invalid then logo = ch.logo
