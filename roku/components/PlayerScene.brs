@@ -93,12 +93,20 @@ function startLineupTask(mode as String, force as Boolean) as Object
     task.mode = mode
     task.force = force
     task.ObserveField("lineup", "onLineup")
+    if mode = "refresh" then task.ObserveField("progress", "onProgress")
     task.control = "RUN"
     return task
 end function
 
 sub refreshLineup()
     m.refreshTask = startLineupTask("refresh", false)
+end sub
+
+' Loading progress and errors, shown until something is playing.
+sub onProgress(event as Object)
+    text = event.GetData()
+    if text = "" or m.currentUrl <> "" or m.guide.visible then return
+    showStatus("", text)
 end sub
 
 sub onLineup(event as Object)
@@ -111,8 +119,9 @@ sub onLineup(event as Object)
     applyFilter()
 
     if m.channels.Count() = 0
-        if not fromCache and m.currentUrl = ""
-            showStatus("", "Couldn't load channels. Check the TV's internet connection.")
+        ' A failed load leaves its own message on screen (see onProgress).
+        if not fromCache and m.currentUrl = "" and lineup.failed = invalid and m.allChannels.Count() > 0
+            showStatus("", "No official channels found. Press OK and switch the guide to All streams.")
         end if
         return
     end if

@@ -9,5 +9,10 @@ sub work()
         m.top.lineup = lineup
         return
     end if
-    m.top.lineup = buildLineup(m.top.force)
+    try
+        buildLineup(m.top.force, m.top)
+    catch e
+        m.top.progress = "Something went wrong loading channels: " + e.message
+        m.top.lineup = { channels: [], builtAt: 0, failed: true }
+    end try
 end sub

@@ -14,54 +14,90 @@ function guideFeeds() as Object
 end function
 
 function readLineupCache() as Dynamic
-    text = ReadAsciiFile("cachefs:/lineup.json")
+    text = ReadAsciiFile(cachePath())
     if text = invalid or text = "" then return invalid
-    return ParseJson(text)
-end function
-
-function buildLineup(force as Boolean) as Object
-    now = CreateObject("roDateTime").AsSeconds()
-    cached = readLineupCache()
-
-    channels = invalid
-    playlistFresh = false
-    if not force and cached <> invalid and cached.channels <> invalid and cached.channels.Count() > 0
-        if now - cached.playlistAt < 24 * 3600 then channels = cached.channels
-    end if
-    playlistAt = now
-    if channels = invalid
-        text = download(playlistUrl())
-        if text <> invalid then channels = parseM3u(text)
-        playlistFresh = true
-        if (channels = invalid or channels.Count() = 0) and cached <> invalid and cached.channels <> invalid
-            channels = cached.channels
-            playlistAt = cached.playlistAt
-        end if
-    else
-        playlistAt = cached.playlistAt
-    end if
-    if channels = invalid then channels = []
-
-    guideAt = 0
-    if cached <> invalid and cached.guideAt <> invalid then guideAt = cached.guideAt
-    if force or playlistFresh or now - guideAt > 3 * 3600
-        attachGuide(channels, now)
-        guideAt = now
-    end if
-
-    lineup = { channels: channels, playlistAt: playlistAt, guideAt: guideAt, builtAt: now }
-    WriteAsciiFile("cachefs:/lineup.json", FormatJson(lineup))
+    lineup = ParseJson(text)
+    if lineup = invalid or lineup.channels = invalid then return invalid
     return lineup
 end function
 
+function cachePath() as String
+    return "cachefs:/lineup.json"
+end function
+
+' Builds the lineup in two steps and publishes each one through out.lineup, so channels can play
+' while the guide is still loading. out.progress says what it's doing, for the loading screen.
+sub buildLineup(force as Boolean, out as Object)
+    now = CreateObject("roDateTime").AsSeconds()
+    cached = readLineupCache()
+    playlistAt = 0
+    guideAt = 0
+    if cached <> invalid
+        if cached.playlistAt <> invalid then playlistAt = cached.playlistAt
+        if cached.guideAt <> invalid then guideAt = cached.guideAt
+    end if
+
+    ' 1. Channel list (daily).
+    channels = invalid
+    playlistFresh = false
+    useCached = false
+    if not force and cached <> invalid
+        if cached.channels.Count() > 0 and now - playlistAt < 24 * 3600 then useCached = true
+    end if
+    if useCached
+        channels = cached.channels
+    else
+        out.progress = "Downloading channel list…"
+        text = download(playlistUrl())
+        if text <> invalid
+            out.progress = "Reading channel list…"
+            channels = parseM3u(text)
+            text = invalid
+        end if
+        if channels <> invalid and channels.Count() > 0
+            playlistFresh = true
+            playlistAt = now
+        else if cached <> invalid
+            channels = cached.channels
+        else
+            out.progress = "Couldn't download the channel list. Check the TV's internet connection."
+            out.lineup = { channels: [], playlistAt: 0, guideAt: 0, builtAt: now, failed: true }
+            return
+        end if
+    end if
+
+    ' Publish the channels right away; the guide follows.
+    lineup = { channels: channels, playlistAt: playlistAt, guideAt: guideAt, builtAt: now }
+    out.lineup = lineup
+
+    ' 2. Guide (every 3 hours).
+    if force or playlistFresh or now - guideAt > 3 * 3600
+        attachGuide(channels, now, out)
+        lineup = { channels: channels, playlistAt: playlistAt, guideAt: now, builtAt: now }
+        out.lineup = lineup
+    end if
+    out.progress = ""
+    WriteAsciiFile(cachePath(), FormatJson(lineup))
+end sub
+
+' GET with a time limit; returns invalid on failure.
 function download(url as String) as Dynamic
+    port = CreateObject("roMessagePort")
     xfer = CreateObject("roUrlTransfer")
+    xfer.SetMessagePort(port)
     xfer.SetUrl(url)
     xfer.SetCertificatesFile("common:/certs/ca-bundle.crt")
     xfer.InitClientCertificates()
     xfer.EnableEncodings(true)
     xfer.AddHeader("User-Agent", "LiveTV-Roku/1.4")
-    text = xfer.GetToString()
+    if not xfer.AsyncGetToString() then return invalid
+    msg = Wait(60000, port)
+    if Type(msg) <> "roUrlEvent"
+        xfer.AsyncCancel()
+        return invalid
+    end if
+    if msg.GetResponseCode() <> 200 then return invalid
+    text = msg.GetString()
     if text = invalid or text = "" then return invalid
     return text
 end function
@@ -134,10 +170,27 @@ function makeChannel(info as String, url as String, ua as String, ref as String,
 end function
 
 function cleanName(raw as String) as String
-    s = CreateObject("roRegex", "\s*\(\d{3,4}[pi]\)", "").ReplaceAll(raw, "")
-    s = CreateObject("roRegex", "\s*\[[^\]]*\]", "").ReplaceAll(s, "")
-    s = CreateObject("roRegex", "\s{2,}", "").ReplaceAll(s, " ")
+    re = regexes()
+    s = re.resolution.ReplaceAll(raw, "")
+    s = re.brackets.ReplaceAll(s, "")
+    s = re.spaces.ReplaceAll(s, " ")
     return s.Trim()
+end function
+
+' Compiled once per thread and reused.
+function regexes() as Object
+    if m.lineupRegexes = invalid
+        m.lineupRegexes = {
+            resolution: CreateObject("roRegex", "\s*\(\d{3,4}[pi]\)", ""),
+            brackets: CreateObject("roRegex", "\s*\[[^\]]*\]", ""),
+            spaces: CreateObject("roRegex", "\s{2,}", ""),
+            host: CreateObject("roRegex", "^https?://([^/:?#]+)(:\d+)?", "i"),
+            parens: CreateObject("roRegex", "\(.*?\)|\[.*?\]", ""),
+            prefix: CreateObject("roRegex", "^(pluto tv|samsung|plex)\s+", ""),
+            nonAlnum: CreateObject("roRegex", "[^a-z0-9]", ""),
+        }
+    end if
+    return m.lineupRegexes
 end function
 
 function formatOf(url as String) as String
@@ -150,7 +203,7 @@ end function
 
 ' Same list as the phone app's Official.kt: free streaming services, broadcasters and major CDNs.
 function isOfficial(url as String) as Boolean
-    mt = CreateObject("roRegex", "^https?://([^/:?#]+)(:\d+)?", "i").Match(url)
+    mt = regexes().host.Match(url)
     if mt.Count() < 2 then return false
     if mt.Count() > 2 and mt[2] <> "" then return false
     host = LCase(mt[1])
@@ -171,12 +224,16 @@ end function
 
 ' ---- Guide ----
 
-sub attachGuide(channels as Object, now as Integer)
+sub attachGuide(channels as Object, now as Integer, out as Object)
     until = now + 8 * 3600
     byKey = {}
-    for each feed in guideFeeds()
+    feeds = guideFeeds()
+    for i = 0 to feeds.Count() - 1
+        feed = feeds[i]
+        out.progress = "Downloading guide " + (i + 1).ToStr() + " of " + feeds.Count().ToStr() + "…"
         text = download(feed.url)
         if text <> invalid
+            out.progress = "Reading guide " + (i + 1).ToStr() + " of " + feeds.Count().ToStr() + "…"
             parsed = parseXmltv(text, feed.byId, now, until)
             text = invalid
             for each k in parsed
@@ -192,14 +249,26 @@ sub attachGuide(channels as Object, now as Integer)
         mt = plutoRe.Match(ch.url)
         if mt.Count() > 1 then list = byKey["id:" + mt[1]]
         if list = invalid then list = byKey["name:" + normalizeName(ch.name)]
-        if list <> invalid then ch.p = list
+        ' Each channel gets its own copy: FormatJson refuses objects shared between channels.
+        if list <> invalid then ch.p = copyProgrammes(list)
     end for
 end sub
 
+function copyProgrammes(list as Object) as Object
+    out = []
+    for each p in list
+        item = { t: p.t, s: p.s, e: p.e }
+        if p.d <> invalid then item.d = p.d
+        out.Push(item)
+    end for
+    return out
+end function
+
 function normalizeName(name as String) as String
-    s = LCase(CreateObject("roRegex", "\(.*?\)|\[.*?\]", "").ReplaceAll(name, ""))
-    s = CreateObject("roRegex", "^(pluto tv|samsung|plex)\s+", "").ReplaceAll(s, "")
-    return CreateObject("roRegex", "[^a-z0-9]", "").ReplaceAll(s, "")
+    re = regexes()
+    s = LCase(re.parens.ReplaceAll(name, ""))
+    s = re.prefix.ReplaceAll(s, "")
+    return re.nonAlnum.ReplaceAll(s, "")
 end function
 
 ' Parses XMLTV by splitting on </programme>, so every search runs on a small string.
@@ -272,8 +341,10 @@ function tagText(s as String, tag as String) as String
     return Mid(s, gt + 1, b - gt - 1)
 end function
 
+' Decodes XML entities. Straight double quotes become typographic ones so the text can't upset
+' the JSON cache, whatever the JSON writer does with quotes.
 function unescapeXml(s as String) as String
-    s = s.Replace("&lt;", "<").Replace("&gt;", ">").Replace("&quot;", Chr(34))
+    s = s.Replace("&lt;", "<").Replace("&gt;", ">").Replace("&quot;", Chr(8221)).Replace(Chr(34), Chr(8221))
     s = s.Replace("&apos;", "'").Replace("&#39;", "'")
     return s.Replace("&amp;", "&")
 end function

@@ -8,7 +8,9 @@
     <interface>
         <field id="mode" type="string" value="refresh" />
         <field id="force" type="boolean" />
-        <field id="lineup" type="assocarray" />
+        <field id="lineup" type="assocarray" alwaysNotify="true" />
+        <!-- What it's doing right now, shown on the loading screen. -->
+        <field id="progress" type="string" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/LineupTask.brs" />
     <script type="text/brightscript" uri="pkg:/source/Lineup.brs" />
