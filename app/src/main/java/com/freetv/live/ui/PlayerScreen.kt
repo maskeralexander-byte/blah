@@ -1,0 +1,294 @@
+package com.freetv.live.ui
+
+import android.net.Uri
+import android.view.KeyEvent as AndroidKeyEvent
+import androidx.activity.compose.BackHandler
+import androidx.annotation.OptIn
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.nativeKeyCode
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.common.util.Util
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
+import com.freetv.live.data.Channel
+import kotlinx.coroutines.delay
+
+private const val DEFAULT_UA =
+    "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36"
+
+@OptIn(UnstableApi::class)
+@Composable
+fun PlayerScreen(vm: TvViewModel, onExit: () -> Unit) {
+    val queue by vm.queue.collectAsState()
+    val index by vm.playing.collectAsState()
+    val favorites by vm.favorites.collectAsState()
+    val i = index ?: return
+    val channel = queue.getOrNull(i) ?: return
+
+    val context = LocalContext.current
+    val player = remember { ExoPlayer.Builder(context).build().apply { playWhenReady = true } }
+    DisposableEffect(Unit) { onDispose { player.release() } }
+
+    var buffering by remember { mutableStateOf(true) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var overlayTick by remember { mutableIntStateOf(0) }
+    var overlayVisible by remember { mutableStateOf(true) }
+    var digits by remember { mutableStateOf("") }
+    // Streams without a recognisable extension are tried as HLS first, then as a plain stream.
+    var forceProgressive by remember(channel.url) { mutableStateOf(false) }
+
+    DisposableEffect(player, channel.url) {
+        val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(state: Int) {
+                buffering = state == Player.STATE_BUFFERING
+                if (state == Player.STATE_READY) error = null
+            }
+            override fun onPlayerError(e: PlaybackException) {
+                if (!forceProgressive && guessedHls(channel.url)) {
+                    forceProgressive = true
+                } else {
+                    error = "This channel isn't working right now (${e.errorCodeName})."
+                }
+            }
+        }
+        player.addListener(listener)
+        onDispose { player.removeListener(listener) }
+    }
+
+    LaunchedEffect(channel.url, forceProgressive) {
+        error = null
+        buffering = true
+        startChannel(player, channel, forceProgressive)
+        overlayVisible = true
+        overlayTick++
+    }
+
+    LaunchedEffect(overlayTick) {
+        delay(4_000)
+        overlayVisible = false
+    }
+
+    LaunchedEffect(digits) {
+        if (digits.isEmpty()) return@LaunchedEffect
+        delay(1_500)
+        digits.toIntOrNull()?.let { n -> if (n in 1..queue.size) vm.playAt(n - 1) }
+        digits = ""
+    }
+
+    BackHandler { vm.stop(); onExit() }
+
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focus.requestFocus() }
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .focusRequester(focus)
+            .focusable()
+            .onPreviewKeyEvent { ev ->
+                if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                when (val code = ev.key.nativeKeyCode) {
+                    AndroidKeyEvent.KEYCODE_DPAD_UP, AndroidKeyEvent.KEYCODE_CHANNEL_UP -> { vm.playAt(i + 1); true }
+                    AndroidKeyEvent.KEYCODE_DPAD_DOWN, AndroidKeyEvent.KEYCODE_CHANNEL_DOWN -> { vm.playAt(i - 1); true }
+                    AndroidKeyEvent.KEYCODE_DPAD_CENTER, AndroidKeyEvent.KEYCODE_ENTER,
+                    AndroidKeyEvent.KEYCODE_INFO, AndroidKeyEvent.KEYCODE_DPAD_LEFT,
+                    AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> { overlayVisible = true; overlayTick++; true }
+                    AndroidKeyEvent.KEYCODE_MENU, AndroidKeyEvent.KEYCODE_BOOKMARK,
+                    AndroidKeyEvent.KEYCODE_PROG_YELLOW -> { vm.toggleFavorite(channel); overlayVisible = true; overlayTick++; true }
+                    in AndroidKeyEvent.KEYCODE_0..AndroidKeyEvent.KEYCODE_9 -> {
+                        digits = (digits + (code - AndroidKeyEvent.KEYCODE_0)).takeLast(5); true
+                    }
+                    else -> false
+                }
+            }
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                overlayVisible = !overlayVisible
+                if (overlayVisible) overlayTick++
+            },
+    ) {
+        AndroidView(
+            factory = { ctx ->
+                PlayerView(ctx).apply {
+                    useController = false
+                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                    keepScreenOn = true
+                    isFocusable = false
+                    this.player = player
+                }
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
+
+        if (buffering && error == null) {
+            CircularProgressIndicator(Modifier.align(Alignment.Center), color = Accent)
+        }
+
+        error?.let {
+            Column(
+                Modifier.align(Alignment.Center).background(Color(0xCC000000), RoundedCornerShape(16.dp)).padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(it, color = Color.White, style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.padding(4.dp))
+                Text("Press ▲ / ▼ (or tap the arrows) to try another channel.",
+                    color = Color(0xFFBBBBCC), style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+
+        if (digits.isNotEmpty()) {
+            Text(
+                digits,
+                Modifier.align(Alignment.TopEnd).padding(32.dp)
+                    .background(Color(0xCC000000), RoundedCornerShape(12.dp)).padding(horizontal = 20.dp, vertical = 10.dp),
+                color = Color.White,
+                style = MaterialTheme.typography.displaySmall,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+
+        AnimatedVisibility(overlayVisible, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.fillMaxSize()) {
+            Box(Modifier.fillMaxSize()) {
+                IconButton(
+                    onClick = { vm.stop(); onExit() },
+                    modifier = Modifier.align(Alignment.TopStart).padding(16.dp).background(Color(0x88000000), RoundedCornerShape(50)),
+                ) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White) }
+
+                Column(
+                    Modifier.align(Alignment.CenterEnd).padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    IconButton(onClick = { vm.playAt(i + 1) }, Modifier.background(Color(0x88000000), RoundedCornerShape(50))) {
+                        Icon(Icons.Default.KeyboardArrowUp, "Next channel", tint = Color.White)
+                    }
+                    IconButton(onClick = { vm.playAt(i - 1) }, Modifier.background(Color(0x88000000), RoundedCornerShape(50))) {
+                        Icon(Icons.Default.KeyboardArrowDown, "Previous channel", tint = Color.White)
+                    }
+                }
+
+                InfoBar(
+                    channel = channel,
+                    number = i + 1,
+                    total = queue.size,
+                    favorite = channel.url in favorites,
+                    onFavorite = { vm.toggleFavorite(channel) },
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun InfoBar(channel: Channel, number: Int, total: Int, favorite: Boolean, onFavorite: () -> Unit, modifier: Modifier) {
+    Row(
+        modifier
+            .fillMaxWidth()
+            .background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xEE000000))))
+            .padding(horizontal = 32.dp, vertical = 24.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("$number", color = Accent, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.width(20.dp))
+        ChannelLogo(channel, 64.dp)
+        Spacer(Modifier.width(20.dp))
+        Column(Modifier.weight(1f)) {
+            Text(channel.name, color = Color.White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+            val sub = listOfNotNull(channel.group, channel.country?.let(TvViewModel::countryName), "$number of $total")
+            Text(sub.joinToString(" · "), color = Color(0xFFBBBBCC), style = MaterialTheme.typography.bodyMedium)
+            Text("▲▼ change channel · 0–9 jump to number · MENU favorite",
+                color = Color(0xFF888899), style = MaterialTheme.typography.bodySmall)
+        }
+        IconButton(onClick = onFavorite) {
+            Icon(
+                if (favorite) Icons.Default.Star else Icons.Default.StarBorder,
+                "Favorite",
+                tint = if (favorite) Color(0xFFFFC94D) else Color.White,
+            )
+        }
+    }
+}
+
+private fun guessedHls(url: String): Boolean =
+    Util.inferContentType(Uri.parse(url)) == C.CONTENT_TYPE_OTHER && !hasMediaExtension(url)
+
+private fun hasMediaExtension(url: String): Boolean {
+    val path = Uri.parse(url).path.orEmpty().lowercase()
+    return listOf(".ts", ".mp4", ".mkv", ".mp3", ".aac", ".flv", ".webm").any { path.endsWith(it) }
+}
+
+@OptIn(UnstableApi::class)
+private fun startChannel(player: ExoPlayer, channel: Channel, forceProgressive: Boolean) {
+    val http = DefaultHttpDataSource.Factory()
+        .setUserAgent(channel.userAgent ?: DEFAULT_UA)
+        .setAllowCrossProtocolRedirects(true)
+        .setConnectTimeoutMs(15_000)
+        .setReadTimeoutMs(20_000)
+    channel.referrer?.let { http.setDefaultRequestProperties(mapOf("Referer" to it)) }
+
+    val item = MediaItem.Builder().setUri(channel.url).apply {
+        if (!forceProgressive && guessedHls(channel.url)) setMimeType(MimeTypes.APPLICATION_M3U8)
+    }.build()
+
+    player.setMediaSource(DefaultMediaSourceFactory(http).createMediaSource(item))
+    player.prepare()
+    player.play()
+}
