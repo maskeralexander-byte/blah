@@ -27,7 +27,9 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -52,7 +54,9 @@ import androidx.compose.ui.input.key.nativeKeyCode
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -112,17 +116,25 @@ fun PlayerScreen(vm: TvViewModel, onExit: () -> Unit) {
     var reconnectAt by remember(channel.url) { mutableStateOf<Long?>(null) }
     var restartKey by remember(channel.url) { mutableIntStateOf(0) }
 
-    DisposableEffect(player, channel.url) {
-        fun scheduleReconnect(reason: String) {
-            val max = if (played) MAX_RETRIES_AFTER_PLAYING else MAX_RETRIES_BEFORE_PLAYING
-            if (retries < max) {
-                reconnectAt = System.currentTimeMillis() + backoffMs(retries)
-                retries++
-            } else {
-                error = "This channel isn't working right now ($reason)."
-                vm.markFailed(channel)
-            }
+    fun giveUp(reason: String) {
+        player.stop()
+        reconnectAt = null
+        error = "This channel isn't working right now ($reason)."
+        vm.markFailed(channel)
+    }
+
+    fun scheduleReconnect(reason: String) {
+        val max = if (played) MAX_RETRIES_AFTER_PLAYING else MAX_RETRIES_BEFORE_PLAYING
+        if (retries < max) {
+            player.stop()
+            reconnectAt = System.currentTimeMillis() + backoffMs(retries)
+            retries++
+        } else {
+            giveUp(reason)
         }
+    }
+
+    DisposableEffect(player, channel.url) {
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
                 buffering = state == Player.STATE_BUFFERING
@@ -154,6 +166,18 @@ fun PlayerScreen(vm: TvViewModel, onExit: () -> Unit) {
         }
         player.addListener(listener)
         onDispose { player.removeListener(listener) }
+    }
+
+    // Watchdog: some dead servers accept the connection and then send nothing, which never
+    // raises a player error. Treat a stream that stays stuck loading as failed.
+    LaunchedEffect(channel.url, restartKey, forceProgressive, buffering, played, error, reconnectAt) {
+        if (!buffering || error != null || reconnectAt != null) return@LaunchedEffect
+        delay(if (played) STALL_TIMEOUT_MS else STARTUP_TIMEOUT_MS)
+        when {
+            played -> scheduleReconnect("stalled")
+            !forceProgressive && guessedHls(channel.url) -> forceProgressive = true
+            else -> scheduleReconnect("no response")
+        }
     }
 
     LaunchedEffect(reconnectAt) {
@@ -247,8 +271,15 @@ fun PlayerScreen(vm: TvViewModel, onExit: () -> Unit) {
             ) {
                 Text(it, color = Color.White, style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.padding(4.dp))
-                Text("Press ▲ / ▼ (or tap the arrows) to try another channel.",
+                Text("It's been hidden from the list for now.",
                     color = Color(0xFFBBBBCC), style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.padding(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedButton(onClick = { retries = 0; error = null; restartKey++ }) {
+                        Text("Try again", color = Color.White)
+                    }
+                    Button(onClick = { vm.playAt(i + 1) }) { Text("Next channel") }
+                }
             }
         }
 
@@ -297,23 +328,31 @@ fun PlayerScreen(vm: TvViewModel, onExit: () -> Unit) {
 
 @Composable
 private fun InfoBar(channel: Channel, number: Int, total: Int, favorite: Boolean, onFavorite: () -> Unit, modifier: Modifier) {
+    // Phones in portrait get a compact bar; the remote-key hint only shows on wide (TV) screens.
+    val compact = LocalConfiguration.current.screenWidthDp < 600
     Row(
         modifier
             .fillMaxWidth()
             .background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xEE000000))))
-            .padding(horizontal = 32.dp, vertical = 24.dp),
+            .padding(horizontal = if (compact) 16.dp else 32.dp, vertical = if (compact) 16.dp else 24.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("$number", color = Accent, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.width(20.dp))
-        ChannelLogo(channel, 64.dp)
-        Spacer(Modifier.width(20.dp))
+        Text("$number", color = Accent, fontWeight = FontWeight.Bold,
+            style = if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium)
+        Spacer(Modifier.width(if (compact) 12.dp else 20.dp))
+        ChannelLogo(channel, if (compact) 44.dp else 64.dp)
+        Spacer(Modifier.width(if (compact) 12.dp else 20.dp))
         Column(Modifier.weight(1f)) {
-            Text(channel.name, color = Color.White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+            Text(channel.name, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                style = if (compact) MaterialTheme.typography.titleMedium else MaterialTheme.typography.headlineSmall)
             val sub = listOfNotNull(channel.group, channel.country?.let(TvViewModel::countryName), "$number of $total")
-            Text(sub.joinToString(" · "), color = Color(0xFFBBBBCC), style = MaterialTheme.typography.bodyMedium)
-            Text("▲▼ change channel · 0–9 jump to number · MENU favorite",
-                color = Color(0xFF888899), style = MaterialTheme.typography.bodySmall)
+            Text(sub.joinToString(" · "), color = Color(0xFFBBBBCC), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                style = if (compact) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium)
+            if (!compact) {
+                Text("▲▼ change channel · 0–9 jump to number · MENU favorite",
+                    color = Color(0xFF888899), style = MaterialTheme.typography.bodySmall)
+            }
         }
         IconButton(onClick = onFavorite) {
             Icon(
@@ -325,7 +364,9 @@ private fun InfoBar(channel: Channel, number: Int, total: Int, favorite: Boolean
     }
 }
 
-private const val MAX_RETRIES_BEFORE_PLAYING = 2
+private const val MAX_RETRIES_BEFORE_PLAYING = 1
+private const val STARTUP_TIMEOUT_MS = 15_000L
+private const val STALL_TIMEOUT_MS = 20_000L
 private const val MAX_RETRIES_AFTER_PLAYING = 6
 
 private fun backoffMs(attempt: Int): Long = minOf(1_000L shl attempt, 15_000L)
