@@ -13,11 +13,19 @@ function guideFeeds() as Object
     ]
 end function
 
+' Bump when the cached lineup's shape changes, so copies written by older versions are ignored
+' (version 1.3 and earlier cached the phone's list, without fields this version relies on).
+function lineupFormat() as Integer
+    return 2
+end function
+
 function readLineupCache() as Dynamic
     text = ReadAsciiFile(cachePath())
     if text = invalid or text = "" then return invalid
     lineup = ParseJson(text)
     if lineup = invalid or lineup.channels = invalid then return invalid
+    if lineup.format = invalid then return invalid
+    if lineup.format <> lineupFormat() then return invalid
     return lineup
 end function
 
@@ -61,19 +69,19 @@ sub buildLineup(force as Boolean, out as Object)
             channels = cached.channels
         else
             out.progress = "Couldn't download the channel list. Check the TV's internet connection."
-            out.lineup = { channels: [], playlistAt: 0, guideAt: 0, builtAt: now, failed: true }
+            out.lineup = { format: lineupFormat(), channels: [], playlistAt: 0, guideAt: 0, builtAt: now, failed: true }
             return
         end if
     end if
 
     ' Publish the channels right away; the guide follows.
-    lineup = { channels: channels, playlistAt: playlistAt, guideAt: guideAt, builtAt: now }
+    lineup = { format: lineupFormat(), channels: channels, playlistAt: playlistAt, guideAt: guideAt, builtAt: now }
     out.lineup = lineup
 
     ' 2. Guide (every 3 hours).
     if force or playlistFresh or now - guideAt > 3 * 3600
         attachGuide(channels, now, out)
-        lineup = { channels: channels, playlistAt: playlistAt, guideAt: now, builtAt: now }
+        lineup = { format: lineupFormat(), channels: channels, playlistAt: playlistAt, guideAt: now, builtAt: now }
         out.lineup = lineup
     end if
     out.progress = ""

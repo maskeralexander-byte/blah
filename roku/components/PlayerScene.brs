@@ -146,7 +146,7 @@ end sub
 sub applyFilter()
     list = []
     for each ch in m.allChannels
-        if ch.official or not m.officialOnly then list.Push(ch)
+        if ch.official = true or not m.officialOnly then list.Push(ch)
     end for
     m.channels = list
     found = indexOfUrl(m.currentUrl)
@@ -339,7 +339,9 @@ end sub
 ' ---- Favorites and recents (kept on the TV) ----
 
 function readList(key as String) as Object
-    list = ParseJson(m.registry.Read(key))
+    text = m.registry.Read(key)
+    if text = "" then return []
+    list = ParseJson(text)
     if list = invalid then list = []
     return list
 end function
