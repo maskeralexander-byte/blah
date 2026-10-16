@@ -79,6 +79,7 @@ sub init()
     m.programTimer.control = "start"
     m.top.SetFocus(true)
 
+    print "[livetv] scene ready"
     ' Show the saved lineup right away, then refresh it in the background.
     showStatus("", "Loading channels…")
     m.cacheTask = startLineupTask("cache", false)
@@ -105,6 +106,7 @@ end sub
 ' Loading progress and errors, shown until something is playing.
 sub onProgress(event as Object)
     text = event.GetData()
+    print "[livetv] progress: "; text
     if text = "" or m.currentUrl <> "" or m.guide.visible then return
     showStatus("", text)
 end sub
@@ -113,6 +115,7 @@ sub onLineup(event as Object)
     lineup = event.GetData()
     if lineup = invalid or lineup.channels = invalid then return
     fromCache = event.GetNode() = "cache"
+    print "[livetv] lineup from "; event.GetNode(); ": "; lineup.channels.Count(); " channels"
     ' A late cache result must not replace a fresher download.
     if fromCache and m.allChannels.Count() > 0 then return
     m.allChannels = lineup.channels
@@ -387,6 +390,7 @@ sub openGuide()
     m.video.width = 480
     m.video.height = 270
     m.previewLogoBig.visible = m.video.state <> "playing"
+    m.idleArt.visible = false
     m.guideBg.visible = true
     m.guide.visible = true
     m.searchPanel.visible = false

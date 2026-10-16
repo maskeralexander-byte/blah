@@ -65,7 +65,7 @@ import androidx.compose.ui.unit.sp
 
 /** The phone as a remote for the Live TV app on the Roku. */
 @Composable
-fun RemoteScreen(vm: TvViewModel, onBack: () -> Unit) {
+fun RemoteScreen(vm: TvViewModel, onBack: () -> Unit, onOpenLog: () -> Unit) {
     val target by vm.castTarget.collectAsState()
     val message by vm.castMessage.collectAsState()
     val receiverMissing by vm.receiverMissing.collectAsState()
@@ -98,6 +98,7 @@ fun RemoteScreen(vm: TvViewModel, onBack: () -> Unit) {
                     )
                 }
                 if (target != null) {
+                    TextButton(onClick = onOpenLog) { Text("TV log", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     TextButton(onClick = { tap(vm::openOnTv) }) { Text("Open on TV", color = Cyan) }
                 } else {
                     TextButton(onClick = { showCast = true }) {

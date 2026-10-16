@@ -17,6 +17,7 @@ import com.freetv.live.ui.BrowseScreen
 import com.freetv.live.ui.FreeTvTheme
 import com.freetv.live.ui.PlayerScreen
 import com.freetv.live.ui.RemoteScreen
+import com.freetv.live.ui.TvLogScreen
 import com.freetv.live.ui.SourcesScreen
 import com.freetv.live.ui.TvViewModel
 
@@ -30,11 +31,13 @@ class MainActivity : ComponentActivity() {
                 val playing by vm.playing.collectAsState()
                 var showSources by rememberSaveable { mutableStateOf(false) }
                 var showRemote by rememberSaveable { mutableStateOf(false) }
+                var showLog by rememberSaveable { mutableStateOf(false) }
 
                 LaunchedEffect(playing != null, showRemote) { setFullscreen(playing != null && !showRemote) }
 
                 when {
-                    showRemote -> RemoteScreen(vm, onBack = { showRemote = false })
+                    showLog -> TvLogScreen(vm, onBack = { showLog = false })
+                    showRemote -> RemoteScreen(vm, onBack = { showRemote = false }, onOpenLog = { showLog = true })
                     playing != null -> PlayerScreen(vm, onExit = {}, onOpenRemote = { showRemote = true })
                     showSources -> SourcesScreen(vm, onBack = { showSources = false })
                     else -> BrowseScreen(vm, onOpenSources = { showSources = true }, onOpenRemote = { showRemote = true })

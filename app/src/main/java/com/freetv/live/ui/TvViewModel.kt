@@ -288,6 +288,68 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
     /** Opens the Live TV app on the TV, picking up where it left off. */
     fun openOnTv() = sendCommand()
 
+    // ---- TV log (the Roku's debug console), for troubleshooting ----
+
+    private val _tvLog = MutableStateFlow("")
+    val tvLog: StateFlow<String> = _tvLog.asStateFlow()
+    private var console: java.net.Socket? = null
+
+    private fun appendLog(text: String) {
+        _tvLog.value = (_tvLog.value + text).takeLast(60_000)
+    }
+
+    /** Connects to the TV's console; with [restart], relaunches the TV app so its startup is captured. */
+    fun captureTvLog(restart: Boolean) {
+        val device = _castTarget.value ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            if (console?.isConnected != true || console?.isClosed == true) {
+                val socket = try {
+                    caster.openConsole(device)
+                } catch (e: Exception) {
+                    appendLog("\n[Couldn't open the TV log: ${e.message}. Developer Mode needs to be on.]\n")
+                    return@launch
+                }
+                console = socket
+                appendLog("\n[Connected to ${device.name}'s log]\n")
+                launch {
+                    runCatching {
+                        val buf = CharArray(4096)
+                        val reader = socket.getInputStream().reader()
+                        while (true) {
+                            val n = reader.read(buf)
+                            if (n < 0) break
+                            appendLog(String(buf, 0, n))
+                        }
+                    }
+                    appendLog("\n[Log closed]\n")
+                }
+            }
+            if (restart) {
+                appendLog("\n[Restarting Live TV on the TV…]\n")
+                runCatching { caster.keypress(device, "Home") }
+                kotlinx.coroutines.delay(2_000)
+                runCatching { caster.command(device, emptyMap()) }
+                    .onFailure { appendLog("\n[Couldn't start the app: ${it.message}]\n") }
+            }
+        }
+    }
+
+    /** Asks a stopped (crashed) TV app for its backtrace and variables. */
+    fun tvDebugInfo() {
+        val socket = console ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                socket.getOutputStream().apply {
+                    write("bt\r\n".toByteArray()); flush()
+                    kotlinx.coroutines.delay(500)
+                    write("var\r\n".toByteArray()); flush()
+                }
+            }.onFailure { appendLog("\n[Couldn't send: ${it.message}]\n") }
+        }
+    }
+
+    fun clearTvLog() { _tvLog.value = "" }
+
     /** Shows the receiver install/update card on request. */
     fun requestReceiverUpdate() {
         _receiverMissing.value = true

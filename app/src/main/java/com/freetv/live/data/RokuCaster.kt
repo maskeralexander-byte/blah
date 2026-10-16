@@ -224,6 +224,17 @@ class RokuCaster(private val context: Context) {
         if (!post(device, path, allowNotFound = true)) throw ReceiverMissingException()
     }
 
+    /**
+     * Opens the Roku's BrightScript debug console (port 8085, available in Developer Mode). It
+     * prints the TV app's log, compile errors and crash details.
+     */
+    suspend fun openConsole(device: RokuDevice): java.net.Socket = withContext(Dispatchers.IO) {
+        java.net.Socket().apply {
+            connect(java.net.InetSocketAddress(device.host, 8085), 4_000)
+            soTimeout = 0
+        }
+    }
+
     /** Returns the Roku to its home screen, which stops playback. */
     suspend fun stop(device: RokuDevice) = withContext(Dispatchers.IO) { post(device, "/keypress/Home"); Unit }
 

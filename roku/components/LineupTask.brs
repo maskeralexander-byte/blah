@@ -12,6 +12,7 @@ sub work()
     try
         buildLineup(m.top.force, m.top)
     catch e
+        print "[livetv] lineup error: "; e.message
         m.top.progress = "Something went wrong loading channels: " + e.message
         m.top.lineup = { channels: [], builtAt: 0, failed: true }
     end try

@@ -6,6 +6,7 @@ sub Main(args as Dynamic)
     screen = CreateObject("roSGScreen")
     port = CreateObject("roMessagePort")
     screen.SetMessagePort(port)
+    print "[livetv] starting, version "; CreateObject("roAppInfo").GetVersion()
     scene = screen.CreateScene("PlayerScene")
     screen.Show()
 
