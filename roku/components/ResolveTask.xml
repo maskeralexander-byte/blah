@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- Looks up the playable stream for a channel whose URL is a placeholder (xumo://<id>). -->
+<component name="ResolveTask" extends="Task">
+    <interface>
+        <field id="source" type="string" />
+        <field id="url" type="string" alwaysNotify="true" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/ResolveTask.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Lineup.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Xumo.brs" />
+</component>

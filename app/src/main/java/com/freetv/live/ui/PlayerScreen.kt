@@ -82,6 +82,7 @@ import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.freetv.live.data.Channel
+import com.freetv.live.data.Xumo
 import kotlinx.coroutines.delay
 
 private const val DEFAULT_UA =
@@ -211,7 +212,17 @@ fun PlayerScreen(vm: TvViewModel, onExit: () -> Unit, onOpenRemote: () -> Unit) 
             return@LaunchedEffect
         }
         buffering = true
-        startChannel(player, channel, forceProgressive)
+        val playable = Xumo.idOf(channel.url)?.let { id ->
+            val resolved = runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Xumo.resolve(id) } }
+            resolved.getOrNull()?.let { channel.copy(url = it) }.also {
+                if (it == null) {
+                    buffering = false
+                    error = "This channel isn't working right now (${resolved.exceptionOrNull()?.message})."
+                    vm.markFailed(channel)
+                }
+            } ?: return@LaunchedEffect
+        } ?: channel
+        startChannel(player, playable, forceProgressive)
         if (restartKey == 0) {
             overlayVisible = true
             overlayTick++

@@ -15,7 +15,10 @@ streams**: broadcasters' own free streams and free ad-supported services such as
 | [Free-TV/IPTV](https://github.com/Free-TV/IPTV) | ~2,000 |
 
 On top of those, every channel in Pluto TV's US lineup is added from Pluto's own guide (about 250
-that the lists skip, like Law & Order, Criminal Minds, Cheers and Family Feud). Duplicates are removed. Lists refresh every 12 hours and are cached for offline start-up.
+that the lists skip, like Law & Order, Criminal Minds, Cheers and Family Feud), plus Xumo Play's
+~450 live channels (Hell's Kitchen, NBC News NOW, BritBox Mysteries, FOX LOCAL stations…) with their
+schedule. Xumo streams are looked up when you tune in, since its links are per session.
+Duplicates are removed. Lists refresh every 12 hours and are cached for offline start-up.
 The app opens on **English** channels (about 3,300, tagged using iptv-org's language list); everything
 else is under the **Other languages** tab. Playlists you add yourself always appear under English.
 

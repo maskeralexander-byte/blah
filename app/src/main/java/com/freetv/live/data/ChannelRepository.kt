@@ -108,7 +108,7 @@ class ChannelRepository(context: Context) {
         val (results, english, pluto) = coroutineScope {
             val lists = sources.map { src -> async { loadSource(src, forceRefresh) } }
             val eng = async { loadSource(englishIndex, forceRefresh).first }
-            val plu = async { loadPlutoUs(forceRefresh) }
+            val plu = async { loadPlutoUs(forceRefresh) + loadXumo(forceRefresh) }
             Triple(lists.awaitAll(), eng.await(), plu.await())
         }
         val englishUrls = english.mapTo(HashSet()) { it.url }
@@ -127,6 +127,23 @@ class ChannelRepository(context: Context) {
         val havePluto = channels.mapNotNullTo(HashSet()) { PlutoChannels.idOf(it.url) }
         val extra = pluto.filter { PlutoChannels.idOf(it.url) !in havePluto && seen.add(it.url) }
         LoadResult((channels + extra).sortedBy { it.name.lowercase() }, results.mapNotNull { it.second })
+    }
+
+    /** Xumo Play's live channels, cached as their parsed list. */
+    private fun loadXumo(forceRefresh: Boolean): List<Channel> {
+        val cache = File(cacheDir, "xumo.tsv")
+        val fresh = cache.exists() && System.currentTimeMillis() - cache.lastModified() < CACHE_MS
+        if (forceRefresh || !fresh) {
+            runCatching { Xumo.channels() }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { list ->
+                cache.writeText(list.joinToString("\n") { listOf(it.url, it.name, it.logo.orEmpty(), it.group).joinToString("\t") })
+            }
+        }
+        if (!cache.exists()) return emptyList()
+        return cache.readLines().mapNotNull { line ->
+            val f = line.split('\t')
+            if (f.size < 4) return@mapNotNull null
+            Channel(f[0], f[1], f[2].ifEmpty { null }, f[3], "US", null, null, null, "Xumo Play", english = true, official = true)
+        }
     }
 
     /** Every channel in Pluto TV's US guide (cached like the playlists). */

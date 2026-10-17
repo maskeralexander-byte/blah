@@ -37,6 +37,7 @@ class Guide(private val byKey: Map<String, List<Programme>>) {
         private val plutoId = Regex("""(?:jmp2\.uk/plu-|pluto\.tv/.*?/channel/|/stitch/hls/channel/)([0-9a-f]{24})""")
 
         fun keysFor(channel: Channel): List<String> = listOfNotNull(
+            Xumo.idOf(channel.url)?.let { "xumo:$it" },
             plutoId.find(channel.url)?.groupValues?.get(1)?.let { "id:$it" },
             "name:" + normalizeName(channel.name),
         )
@@ -76,6 +77,7 @@ class GuideRepository(context: Context) {
                 GZIPInputStream(file.inputStream().buffered()).use { parse(it, feed.keyById) }
             }.getOrNull()?.forEach { (k, v) -> merged.putIfAbsent(k, v) }
         }
+        runCatching { Xumo.schedule() }.getOrNull()?.forEach { (k, v) -> merged.putIfAbsent(k, v) }
         Guide(merged)
     }
 

@@ -16,7 +16,7 @@ end function
 ' Bump when the cached lineup's shape changes, so copies written by older versions are ignored
 ' (version 1.3 and earlier cached the phone's list, without fields this version relies on).
 function lineupFormat() as Integer
-    return 3
+    return 4
 end function
 
 function readLineupCache() as Dynamic
@@ -61,6 +61,8 @@ sub buildLineup(force as Boolean, out as Object)
             out.progress = "Reading channel list…"
             channels = parseM3u(text)
             text = invalid
+            addXumoChannels(channels, out)
+            channels.SortBy("name", "i")
         end if
         if channels <> invalid and channels.Count() > 0
             playlistFresh = true
@@ -252,6 +254,8 @@ sub attachGuide(channels as Object, now as Integer, out as Object)
         end if
     end for
 
+    xumo = xumoSchedule(now, out)
+
     plutoRe = CreateObject("roRegex", "jmp2\.uk/plu-([0-9a-f]{24})", "")
     havePluto = {}
     for each ch in channels
@@ -262,6 +266,7 @@ sub attachGuide(channels as Object, now as Integer, out as Object)
             havePluto[mt[1]] = true
             list = byKey["id:" + mt[1]]
         end if
+        if list = invalid and ch.xumo <> invalid then list = xumo["xumo:" + ch.xumo]
         if list = invalid then list = byKey["name:" + normalizeName(ch.name)]
         ' Each channel gets its own copy: FormatJson refuses objects shared between channels.
         if list <> invalid then ch.p = copyProgrammes(list)

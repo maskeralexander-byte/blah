@@ -240,6 +240,37 @@ end sub
 
 sub playStream(url as String, title as String, format as String, ua as String, ref as String)
     if url = m.currentUrl and m.video.state = "playing" then return
+    if Left(url, 7) = "xumo://"
+        ' The stream is looked up when tuning in; startVideo runs once it's known.
+        m.currentUrl = url
+        m.lastTitle = title
+        m.idleArt.visible = false
+        if not m.guide.visible then showStatus(title, "Loading…")
+        m.resolver = CreateObject("roSGNode", "ResolveTask")
+        m.resolver.source = url
+        m.resolver.ObserveField("url", "onResolved")
+        m.resolver.control = "RUN"
+        m.resolving = { url: url, title: title, format: format, ua: ua, ref: ref }
+        return
+    end if
+    startVideo(url, url, title, format, ua, ref)
+end sub
+
+sub onResolved()
+    r = m.resolving
+    if r = invalid or r.url <> m.currentUrl then return
+    stream = m.resolver.url
+    if stream = ""
+        if not m.guide.visible then showStatus(r.title, "This channel isn't working right now. Press Up or Down for another channel.")
+        return
+    end if
+    m.currentUrl = ""
+    startVideo(r.url, stream, r.title, r.format, r.ua, r.ref)
+end sub
+
+' id is the channel's URL in the lineup; stream is what actually plays.
+sub startVideo(id as String, stream as String, title as String, format as String, ua as String, ref as String)
+    url = stream
     content = CreateObject("roSGNode", "ContentNode")
     content.url = url
     content.title = title
@@ -252,7 +283,7 @@ sub playStream(url as String, title as String, format as String, ua as String, r
     if ref <> "" then headers.Push("Referer:" + ref)
     if headers.Count() > 0 then content.HttpHeaders = headers
 
-    m.currentUrl = url
+    m.currentUrl = id
     m.lastTitle = title
     m.idleArt.visible = false
     m.pendingCard = true
