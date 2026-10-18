@@ -364,6 +364,14 @@ class MainActivity : Activity() {
             setTimeout(function(){ var b = fresh(/^apply$/); if (b) __pwrTap(b.closest('.dx-button,button,a') || b); }, 1200);
           };
           for (var gi = 0; gi < grids.length; gi++) {
+            // Single-pick list (TM Schedule): no checkboxes, tapping the store's row selects it.
+            var drows = grids[gi].querySelectorAll('tr.dx-data-row');
+            if (drows.length && ![].some.call(drows, function(tr){ return tr.querySelector('.dx-select-checkbox,.dx-checkbox'); })) {
+              var cell = null;
+              [].forEach.call(drows, function(tr){ [].forEach.call(tr.cells, function(td){ if (!cell && (td.innerText || '').trim() === store) cell = td; }); });
+              if (cell) { __pwrTap(cell); return 'ok:row'; }
+              continue;
+            }
             try {
               var inst = null, DX = window.DevExpress;
               [grids[gi].closest('.dx-widget'), grids[gi].parentElement, grids[gi]].forEach(function(h){ try { if (!inst && h && DX) inst = DX.ui.dxDataGrid.getInstance(h); } catch(e) {} });
@@ -577,9 +585,15 @@ class MainActivity : Activity() {
                 put(name || it[tx], new Date(it[sx]), it[ex] ? new Date(it[ex]) : null);
               });
             });
+            // No scheduler data: read the drawn bars ("Kavee Hangero (Driver)" / "Scheduled - Name (Role)" over "4:56 PM - 10:11 PM").
+            if (!order.length) [].forEach.call(docs[d].querySelectorAll('.dx-scheduler-appointment'), function(e){
+              var m = (e.innerText || '').trim().match(/^([^\n]{3,80})\n\s*(\d{1,2}:\d\d\s*[AP]M)\s*-\s*(\d{1,2}:\d\d\s*[AP]M)\s*$/i); if (!m) return;
+              var sch = /^scheduled\s*-\s*/i.test(m[1]), x = rec(m[1].replace(/^scheduled\s*-\s*/i, ''));
+              if (sch) { x.r.si = m[2].toUpperCase(); x.r.so = m[3].toUpperCase(); } else { x.r.ci = m[2].toUpperCase(); x.r.co = m[3].toUpperCase(); }
+            });
             // Active Shifts cards: "Name (Role)" over "3:57 PM - 1:45 AM". Still on the clock.
             [].forEach.call(docs[d].querySelectorAll('div,a,span,li,button'), function(e){
-              if (!e.getClientRects().length) return;
+              if (!e.getClientRects().length || e.closest('.dx-scheduler')) return;
               var m = (e.innerText || '').trim().match(/^([^\n]{3,60})\n\s*(\d{1,2}:\d\d\s*[AP]M)\s*-\s*(\d{1,2}:\d\d\s*[AP]M)?\s*$/i);
               if (!m || [].some.call(e.children, function(c){ return /\d:\d\d/.test(c.innerText || '') && /\n/.test((c.innerText || '').trim()); })) return;
               var x = rec(m[1]); if (x.sched) return;
