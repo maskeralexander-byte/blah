@@ -82,11 +82,12 @@ const col = (hdr, ...pats) => hdr.findIndex(h => pats.some(p => p instanceof Reg
 function classify(f) {
   const hi = headerIdx(f.rows), hdr = (f.rows[hi] || []).map(h => String(h ?? "").trim()), body = f.rows.slice(hi + 1);
   const H = hdr.map(norm);
-  if (H.includes(norm("Hour (Local Time)"))) return { type: "hourly", hdr, body };
-  if (H.some(h => h.startsWith("todaysroyaltysales"))) return { type: "sales", hdr, body };
+  // Most specific first: Hourly and Labor also have a "Today's Royalty Sales" column.
+  if (H.some(h => h.startsWith("hour")) && H.some(h => h === "#de" || h === "#inside")) return { type: "hourly", hdr, body };
   if (H.some(h => h.includes("currentlaborhours"))) return { type: "labor", hdr, body };
   if (H.some(h => h.includes("salesperlaborhr"))) return { type: "keys", hdr, body };
   if (/schedule/i.test(f.name) || H.some(h => /clock|punch|shift|sched/.test(h))) return { type: "schedule", hdr, body };
+  if (H.some(h => h.startsWith("todaysroyaltysales"))) return { type: "sales", hdr, body };
   return { type: "other", hdr, body };
 }
 
@@ -239,7 +240,9 @@ function render() {
 
   // Headline numbers.
   const k = [];
-  k.push(kpi("SPLH now", R.splh != null ? money(R.splh) : "–", R.splh != null ? vsGoal(R.splh, goal) : "Needs sales + labor exports",
+  // After close (nobody on the clock), the numbers are the day's final ones until the next day starts at 6 AM.
+  const closed = R.schedule ? !R.schedule.shifts.some(s => s.working) : false;
+  k.push(kpi(closed ? "Day's final SPLH" : "SPLH now", R.splh != null ? money(R.splh) : "–", R.splh != null ? vsGoal(R.splh, goal) : "Needs sales + labor exports",
     R.laborNow ? `${money(R.salesNow)} on ${hrs(R.laborNow)} labor hrs` : ""));
   k.push(kpi("Sales so far", money(R.salesNow), R.sales && R.sales.pyST ? pct(R.salesNow, R.sales.pyST) + " vs last year" : "", R.sales && R.sales.pyEod ? `Last year's full day ${money(R.sales.pyEod)}` : ""));
   const cur = R.hourly?.rows.find(r => r.current), lastDone = R.hourly ? [...R.hourly.rows].reverse().find(r => !r.current && r.hours > 0) : null;
@@ -256,11 +259,12 @@ function render() {
   // Alerts / what to do.
   const al = [];
   if (R.hourlyStores) al.push(["bad", `The Hourly Sales report has ${R.hourlyStores} stores added together, not just ${esc(store)}, so it was left out. The grab picks store ${esc(store)} in PWR automatically; check the grab log for a “Store” line.`]);
-  if (R.splh != null) {
+  if (R.splh != null && closed) al.push([R.splh < goal ? "bad" : "good", `Store closed: the day finished ${money(Math.abs(R.splh - goal))} ${R.splh < goal ? "under" : "over"} goal (${money(R.salesNow)} on ${hrs(R.laborNow)} labor hrs).`]);
+  else if (R.splh != null) {
     if (R.splh < goal) al.push(["bad", `SPLH is ${money(goal - R.splh)} under goal. Covering the gap needs ${money(goal * R.laborNow - R.salesNow)} more sales at current labor.`]);
     else al.push(["good", `SPLH is ${money(R.splh - goal)} over goal. You can use ${hrs(R.salesNow / goal - R.laborNow)} more labor hours before dropping under ${money(goal)}.`]);
   }
-  if (R.laborClose && R.salesNow != null) {
+  if (R.laborClose && R.salesNow != null && !closed) {
     const need = goal * R.laborClose - R.salesNow;
     al.push([need > (R.lyRest ?? 0) ? "warn" : "good", need > 0 ? `To finish at ${money(goal)} with everyone leaving on schedule: ${money(need)} more sales${R.lyRest != null ? ` (last year did ${money(R.lyRest)} from here)` : ""}.` : `Goal for the day is already locked in, even with no more sales.`]);
     al.push(["warn", `If no more sales come in, the day finishes at ${money(R.salesNow / R.laborClose)}.`]);

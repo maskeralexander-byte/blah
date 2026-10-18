@@ -332,7 +332,7 @@ class MainActivity : Activity() {
     private fun storeJs(store: String, phase: String) = tapJs + visJs + """
         (function(store, phase){
           var norm = __pwrNorm, vis = function(e){ return !!e.getClientRects().length; };
-          var inPopup = function(e){ return !!e.closest('.dx-overlay-content,.dx-submenu,.dx-popup-wrapper,.dx-context-menu'); };
+          var inPopup = function(e){ return !!e.closest('.dx-overlay-content,.dx-submenu,.dx-popup-wrapper,.dx-context-menu,.dx-overlay-wrapper,[role=dialog]'); };
           if (phase === 'open') {
             var skip = /^(today|yesterday|latest date|stores to show|local currency)|currency|\d+ \d+ \d{4}/;
             var items = [].filter.call(document.querySelectorAll('.dx-menu-item'), function(e){ return vis(e) && !inPopup(e) && !skip.test(norm(e.innerText)); });
@@ -350,6 +350,8 @@ class MainActivity : Activity() {
             return best;
           };
           if (phase === 'list' || phase === 'listonly') {
+            // Some pages open the store list straight away.
+            if ([].some.call(document.querySelectorAll('.dx-datagrid'), function(g){ return vis(g) && inPopup(g); })) return 'ok';
             var item = fresh(/^select from list$/);
             if (item) { __pwrTap(item.closest('.dx-treeview-item,.dx-menu-item,[role=menuitem],[role=treeitem],li,a') || item); return 'ok'; }
             var grp = fresh(/^select store$/);
