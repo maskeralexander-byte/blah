@@ -83,7 +83,7 @@ function classify(f) {
   const hi = headerIdx(f.rows), hdr = (f.rows[hi] || []).map(h => String(h ?? "").trim()), body = f.rows.slice(hi + 1);
   const H = hdr.map(norm);
   if (H.includes(norm("Hour (Local Time)"))) return { type: "hourly", hdr, body };
-  if (H.includes("store") && H.some(h => h.startsWith("todaysroyaltysales"))) return { type: "sales", hdr, body };
+  if (H.some(h => h.startsWith("todaysroyaltysales"))) return { type: "sales", hdr, body };
   if (H.some(h => h.includes("currentlaborhours"))) return { type: "labor", hdr, body };
   if (H.some(h => h.includes("salesperlaborhr"))) return { type: "keys", hdr, body };
   if (/schedule/i.test(f.name) || H.some(h => /clock|punch|shift|sched/.test(h))) return { type: "schedule", hdr, body };
@@ -125,7 +125,11 @@ function analyze(files, store) {
   const res = { files, hourly: null, sales: null, schedule: null, labor: null, notes: [] };
   for (const f of files) {
     const c = classify(f); f.kind = c.type;
-    if (c.type === "hourly") res.hourly = readHourly(c, new Date(Math.min(now, f.modified || now)));
+    if (c.type === "hourly") {
+      const h = readHourly(c, new Date(Math.min(now, f.modified || now)));
+      // A team/grouped report adds up several stores (and averages their crews): not usable for one store.
+      if (h.stores > 1) res.hourlyStores = h.stores; else res.hourly = h;
+    }
     if (c.type === "sales") res.sales = readSales(c, store);
     if (c.type === "schedule") res.schedule = readSchedule(c, now);
     if (c.type === "labor") res.labor = c;
@@ -150,9 +154,11 @@ function analyze(files, store) {
 function readHourly(c, now) {
   const H = c.hdr;
   const iH = col(H, "Hour (Local Time)"), iS = col(H, /today'?s royalty sales/i, /royalty sales/i), iDE = col(H, "# DE"), iIn = col(H, "# Inside"),
-    iAs = col(H, /as of/i), iPy = col(H, /py st royalty/i), iOrd = col(H, /ord cnt/i), iDel = col(H, /delv cnt/i), iAdt = col(H, /^eadt$/i);
+    iSc = col(H, "Store Count"), iAs = col(H, /as of/i), iPy = col(H, /py st royalty/i), iOrd = col(H, /ord cnt/i), iDel = col(H, /delv cnt/i), iAdt = col(H, /^eadt$/i);
   const rows = [];
+  let stores = 1;
   for (const r of c.body) {
+    if (iSc >= 0) stores = Math.max(stores, num(r[iSc]) || 1);
     const sp0 = hourSpan(r[iH]); if (!sp0) continue;
     const sp = sp0.a < 6 ? { a: sp0.a + 24, b: sp0.b + 24 } : sp0; // after-midnight hours
     const de = num(r[iDE]) || 0, ins = num(r[iIn]) || 0, crew = de + ins;
@@ -164,12 +170,15 @@ function readHourly(c, now) {
       de, ins, crew, hours: crew * h, current: now >= start && now < end, asOf });
   }
   const sales = rows.reduce((a, r) => a + r.sales, 0), labor = rows.reduce((a, r) => a + r.hours, 0);
-  return { rows, sales, labor, splh: labor ? sales / labor : null, cols: c.hdr };
+  return { rows, sales, labor, splh: labor ? sales / labor : null, cols: c.hdr, stores };
 }
 
 function readSales(c, store) {
-  const H = c.hdr, iSt = col(H, "Store"), iT = col(H, /^today'?s royalty sales$/i), iPy = col(H, /py royalty sales \(st\)/i), iEod = col(H, /py royalty sales \(eod\)/i);
-  const row = c.body.find(r => String(r[iSt] ?? "").replace(/\D/g, "") === String(store)) || (c.body.length === 1 ? c.body[0] : null);
+  const H = c.hdr, iSt0 = col(H, "Store"), iT = col(H, /^today'?s royalty sales$/i), iPy = col(H, /py royalty sales \(st\)/i), iEod = col(H, /py royalty sales \(eod\)/i);
+  const isStore = v => String(v ?? "").trim().match(/^\d+/)?.[0] === String(store);
+  // Store column by name, else whichever column holds the store number.
+  const iSt = iSt0 >= 0 ? iSt0 : H.findIndex((_, i) => c.body.some(r => isStore(r[i])));
+  const row = c.body.find(r => isStore(r[iSt])) || (c.body.length === 1 ? c.body[0] : null);
   if (!row) return null;
   return { today: num(row[iT]), pyST: num(row[iPy]), pyEod: num(row[iEod]) };
 }
@@ -246,6 +255,7 @@ function render() {
 
   // Alerts / what to do.
   const al = [];
+  if (R.hourlyStores) al.push(["bad", `The Hourly Sales report has ${R.hourlyStores} stores added together, not just ${esc(store)}, so it was left out. The grab picks store ${esc(store)} in PWR automatically; check the grab log for a “Store” line.`]);
   if (R.splh != null) {
     if (R.splh < goal) al.push(["bad", `SPLH is ${money(goal - R.splh)} under goal. Covering the gap needs ${money(goal * R.laborNow - R.salesNow)} more sales at current labor.`]);
     else al.push(["good", `SPLH is ${money(R.splh - goal)} over goal. You can use ${hrs(R.salesNow / goal - R.laborNow)} more labor hours before dropping under ${money(goal)}.`]);

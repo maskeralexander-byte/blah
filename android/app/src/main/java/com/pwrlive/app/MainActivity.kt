@@ -275,7 +275,7 @@ class MainActivity : Activity() {
     private fun fileName(entry: String) = entry.split(">").joinToString(" - ") { it.trim() }
 
     private fun runSteps(entry: String, steps: List<String>, i: Int) {
-        if (i >= steps.size) { doExport(fileName(entry)); return }
+        if (i >= steps.size) { selectStore { doExport(fileName(entry)) }; return }
         val step = steps[i]
         grabView.evaluateJavascript(clickTabJs(step, snap = i < steps.size - 1, afterMenu = i > 0)) { r ->
             val v = r?.trim('"') ?: ""
@@ -291,6 +291,97 @@ class MainActivity : Activity() {
             }
         }
     }
+
+    // PWR opens on the team view (all stores added together). Pick the store the way a person
+    // would: team selector -> Select from List -> check the store -> Apply. Skipped when the
+    // selector already shows the store.
+    private fun selectStore(then: () -> Unit) {
+        val store = prefs.getString("p_store", null)?.trim()?.takeIf { it.isNotEmpty() } ?: "2058"
+        grabView.evaluateJavascript(storeJs(store, "open")) { r ->
+            val v = r?.trim('"') ?: ""
+            when {
+                v.startsWith("already") -> then()
+                v.startsWith("opened") -> ui.postDelayed({ storeList(store, 0, then) }, 2500)
+                else -> { log("error", "Store", "Couldn't find the store picker. ${v.substringAfter('|', "").take(300)}"); then() }
+            }
+        }
+    }
+
+    private fun storeList(store: String, tries: Int, then: () -> Unit) {
+        grabView.evaluateJavascript(storeJs(store, "list")) { r ->
+            val v = r?.trim('"') ?: ""
+            when {
+                v.startsWith("ok") -> ui.postDelayed({ storePick(store, then) }, 3500)
+                v.startsWith("expand") && tries < 2 -> ui.postDelayed({ storeList(store, tries + 1, then) }, 1500)
+                else -> { log("error", "Store", "“Select from List” not found. ${v.substringAfter('|', "").take(300)}"); then() }
+            }
+        }
+    }
+
+    private fun storePick(store: String, then: () -> Unit) {
+        grabView.evaluateJavascript(storeJs(store, "pick")) { r ->
+            val v = r?.trim('"') ?: ""
+            if (v.startsWith("ok")) { log("ok", "Store", "Picked store $store"); ui.postDelayed(then, 8000) }
+            else { log("error", "Store", "Store $store not in the list. ${v.substringAfter('|', "").take(300)}"); then() }
+        }
+    }
+
+    private fun storeJs(store: String, phase: String) = tapJs + visJs + """
+        (function(store, phase){
+          var norm = __pwrNorm, vis = function(e){ return !!e.getClientRects().length; };
+          var inPopup = function(e){ return !!e.closest('.dx-overlay-content,.dx-submenu,.dx-popup-wrapper,.dx-context-menu'); };
+          if (phase === 'open') {
+            var skip = /^(today|yesterday|latest date|stores to show|local currency)|currency|\d+ \d+ \d{4}/;
+            var items = [].filter.call(document.querySelectorAll('.dx-menu-item'), function(e){ return vis(e) && !inPopup(e) && !skip.test(norm(e.innerText)); });
+            var sel = items.filter(function(e){ return /team|group|store|^\d{3,5}\b/.test(norm(e.innerText)); })[0];
+            if (!sel) return 'noselector|' + items.map(function(e){ return norm(e.innerText); }).join(', ');
+            if (new RegExp('(^|\\D)' + store + '(\\D|$)').test(norm(sel.innerText))) return 'already';
+            __pwrTap(sel); return 'opened';
+          }
+          var fresh = function(re){
+            var best = null;
+            [].forEach.call(document.querySelectorAll('.dx-treeview-item,.dx-menu-item,[role=menuitem],[role=treeitem],a,li,span,div,button'), function(e){
+              if (!vis(e) || !re.test(norm(e.innerText))) return;
+              if (!best || best.contains(e)) best = e;
+            });
+            return best;
+          };
+          if (phase === 'list') {
+            var item = fresh(/^select from list$/);
+            if (item) { __pwrTap(item.closest('.dx-treeview-item,.dx-menu-item,[role=menuitem],[role=treeitem],li,a') || item); return 'ok'; }
+            var grp = fresh(/^select store$/);
+            if (grp) { __pwrTap(grp.closest('.dx-treeview-item,.dx-menu-item,[role=menuitem],[role=treeitem],li,a') || grp); return 'expand'; }
+            return 'notfound|menu shows: ' + __pwrVisible().slice(0, 30).join(', ');
+          }
+          // phase 'pick': the "Select from List" popup with a store grid.
+          var grids = [].filter.call(document.querySelectorAll('.dx-datagrid'), function(g){ return vis(g) && inPopup(g); });
+          var apply = function(){
+            setTimeout(function(){ var b = fresh(/^apply$/); if (b) __pwrTap(b.closest('.dx-button,button,a') || b); }, 1200);
+          };
+          for (var gi = 0; gi < grids.length; gi++) {
+            try {
+              var inst = null, DX = window.DevExpress;
+              [grids[gi].closest('.dx-widget'), grids[gi].parentElement, grids[gi]].forEach(function(h){ try { if (!inst && h && DX) inst = DX.ui.dxDataGrid.getInstance(h); } catch(e) {} });
+              if (inst) {
+                var items2 = inst.getDataSource().items(), hit = null;
+                for (var k = 0; k < items2.length && !hit; k++) for (var f in items2[k]) if (String(items2[k][f]).trim() === store) { hit = items2[k]; break; }
+                if (hit) { inst.selectRows([inst.keyOf(hit)], false); apply(); return 'ok:api'; }
+              }
+            } catch (e) {}
+            // Fallback: tap checkboxes so only the store's row is checked.
+            var rows = grids[gi].querySelectorAll('tr.dx-data-row'), found = false;
+            [].forEach.call(rows, function(tr){
+              var mine = [].some.call(tr.cells, function(td){ return (td.innerText || '').trim() === store; });
+              var cb = tr.querySelector('.dx-select-checkbox,.dx-checkbox'); if (!cb) return;
+              var on = cb.classList.contains('dx-checkbox-checked') || cb.getAttribute('aria-checked') === 'true';
+              if (mine) found = true;
+              if (mine !== on) __pwrTap(cb);
+            });
+            if (found) { apply(); return 'ok:tap'; }
+          }
+          return 'notfound|' + (grids.length ? 'list has no ' + store : 'no store list opened');
+        })(${JSONObject.quote(store)}, ${JSONObject.quote(phase)})
+    """.trimIndent()
 
     private fun doExport(tab: String) {
         pendingTab = tab
