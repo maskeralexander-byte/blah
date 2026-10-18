@@ -275,7 +275,12 @@ class MainActivity : Activity() {
     private fun fileName(entry: String) = entry.split(">").joinToString(" - ") { it.trim() }
 
     private fun runSteps(entry: String, steps: List<String>, i: Int) {
-        if (i >= steps.size) { selectStore { doExport(fileName(entry)) }; return }
+        if (i >= steps.size) {
+            // Keys reports default to "Latest Date" (one day); the period number needs Period Weeks to Date.
+            if (steps.first().equals("KEYS", true)) selectStore { selectRange("period weeks to date") { doExport(fileName(entry)) } }
+            else selectStore { doExport(fileName(entry)) }
+            return
+        }
         val step = steps[i]
         grabView.evaluateJavascript(clickTabJs(step, snap = i < steps.size - 1, afterMenu = i > 0)) { r ->
             val v = r?.trim('"') ?: ""
@@ -330,6 +335,45 @@ class MainActivity : Activity() {
             else { log("error", "Store", "Store $store not in the list. ${v.substringAfter('|', "").take(300)}"); then() }
         }
     }
+
+    // Sets the date-range selector (e.g. "Latest Date" -> "Period Weeks to Date").
+    private fun selectRange(range: String, then: () -> Unit) {
+        grabView.evaluateJavascript(rangeJs(range, "open")) { r ->
+            val v = r?.trim('"') ?: ""
+            when {
+                v.startsWith("already") -> then()
+                v.startsWith("opened") -> ui.postDelayed({
+                    grabView.evaluateJavascript(rangeJs(range, "pick")) { r2 ->
+                        val v2 = r2?.trim('"') ?: ""
+                        if (v2.startsWith("ok")) { log("ok", "Dates", "Set to “$range”"); ui.postDelayed(then, 8000) }
+                        else { log("error", "Dates", "“$range” not in the date menu. ${v2.substringAfter('|', "").take(300)}"); then() }
+                    }
+                }, 2500)
+                else -> { log("error", "Dates", "Couldn't find the date selector. ${v.substringAfter('|', "").take(300)}"); then() }
+            }
+        }
+    }
+
+    private fun rangeJs(range: String, phase: String) = tapJs + visJs + """
+        (function(range, phase){
+          var norm = __pwrNorm, vis = function(e){ return !!e.getClientRects().length; };
+          var inPopup = function(e){ return !!e.closest('.dx-overlay-content,.dx-submenu,.dx-popup-wrapper,.dx-context-menu,.dx-overlay-wrapper,[role=dialog]'); };
+          if (phase === 'open') {
+            var dateRe = /^(today|yesterday|latest date|current|prior|last|week|period|year|month|quarter|custom)|\d+ \d+ \d{4}|to date/;
+            var sel = [].filter.call(document.querySelectorAll('.dx-menu-item'), function(e){ return vis(e) && !inPopup(e) && dateRe.test(norm(e.innerText)); })[0];
+            if (!sel) return 'nosel|' + [].map.call(document.querySelectorAll('.dx-menu-item'), function(e){ return norm(e.innerText); }).filter(Boolean).slice(0, 15).join(', ');
+            if (norm(sel.innerText).indexOf(range) === 0) return 'already';
+            __pwrTap(sel); return 'opened';
+          }
+          var best = null;
+          [].forEach.call(document.querySelectorAll('.dx-menu-item,.dx-treeview-item,[role=menuitem],li,a,span,div'), function(e){
+            if (!vis(e) || !inPopup(e) || norm(e.innerText) !== range) return;
+            if (!best || best.contains(e)) best = e;
+          });
+          if (best) { __pwrTap(best.closest('.dx-menu-item,.dx-treeview-item,[role=menuitem],li,a') || best); return 'ok'; }
+          return 'notfound|menu shows: ' + __pwrVisible().slice(0, 30).join(', ');
+        })(${JSONObject.quote(range)}, ${JSONObject.quote(phase)})
+    """.trimIndent()
 
     private fun storeJs(store: String, phase: String) = tapJs + visJs + """
         (function(store, phase){
