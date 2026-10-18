@@ -70,8 +70,12 @@ function loadFiles() {
       const b64 = A.read(f.name); if (!b64) continue;
       const wb = XLSX.read(b64, { type: "base64", cellDates: true });
       const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null }).filter(r => r.some(c => c != null && String(c).trim() !== ""));
-      out.push({ ...f, rows });
+      const keep = r => r.some(c => c != null && String(c).trim() !== "");
+      const raw = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
+      // Same cells as PWR shows them ("60.2%", "(2.2%)", "$64.19"), for the stats lists.
+      const shown = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: null });
+      const idx = raw.map((r, i) => keep(r) ? i : -1).filter(i => i >= 0);
+      out.push({ ...f, rows: idx.map(i => raw[i]), text: idx.map(i => shown[i] || raw[i]) });
     } catch (e) { out.push({ ...f, rows: [], err: String(e) }); }
   }
   return out;
@@ -118,6 +122,35 @@ function parseTime(v, after) {
   if (!d) return null;
   if (after && d < after) d = new Date(d.getTime() + 86400e3);
   return d;
+}
+
+// Every number a report has for the store: header label -> value as PWR shows it. Banded headers
+// ("Orders Per Labor Hr" over "All TMs" / "Insiders") are joined into one label.
+function readStats(f, store) {
+  const rows = f.text || f.rows; if (!rows || rows.length < 2) return null;
+  const isStore = r => r.slice(0, 3).some(v => String(v ?? "").trim().match(/^\d+/)?.[0] === String(store));
+  const hi = headerIdx(rows);
+  let si = rows.findIndex((r, i) => i > hi && isStore(r));
+  if (si < 0) si = rows.findIndex((r, i) => i > hi && r.some(v => /\d/.test(String(v ?? ""))));
+  if (si < 0) return null;
+  const isHdr = r => r.filter(v => v != null && String(v).trim() !== "").length >= 2 && !r.some(v => /^[\s$(%-]*\d/.test(String(v ?? "")));
+  const hdrs = rows.slice(hi, si).filter(isHdr);
+  if (!hdrs.length) return null;
+  const width = Math.max(...hdrs.map(r => r.length), rows[si].length);
+  const carry = hdrs.map(() => null), out = [];
+  for (let c = 0; c < width; c++) {
+    const parts = [];
+    hdrs.forEach((r, k) => {
+      const v = r[c] != null && String(r[c]).trim() !== "" ? String(r[c]).replace(/\s+/g, " ").trim() : null;
+      if (v) carry[k] = v;
+      const lab = v || (k < hdrs.length - 1 ? carry[k] : null); // band labels stretch over their sub-columns
+      if (lab && !parts.includes(lab)) parts.push(lab);
+    });
+    const label = parts.join(" · "), val = rows[si][c];
+    if (!label || val == null || String(val).trim() === "" || /^store$/i.test(label)) continue;
+    out.push([label, val instanceof Date ? val.toLocaleDateString() : String(val).trim()]);
+  }
+  return out.length ? out : null;
 }
 
 /* ---------- Analysis ---------- */
@@ -309,6 +342,19 @@ function render() {
     parts.push(`<h2>Shifts (from TM Schedule)</h2><div class="card scroll"><table><tr><th>Team member</th><th>In</th><th>Out</th><th>Sched out</th><th>Hours</th></tr>` +
       R.schedule.shifts.map(s => `<tr><td>${esc(s.name)}</td><td>${clock(s.inT)}</td><td>${s.working ? "on" : clock(s.outT)}</td><td>${clock(s.sOut)}</td><td>${hrs(s.worked)}</td></tr>`).join("") +
       `<tr><th>Total so far</th><th></th><th></th><th></th><th>${hrs(R.schedule.hoursNow)}</th></tr></table></div>`);
+  }
+
+  // All stats: every report except the ones charted above, Keys first.
+  const statFiles = files.filter(f => f.kind !== "hourly" && f.kind !== "schedule")
+    .sort((a, b) => (/^KEYS/i.test(b.name) - /^KEYS/i.test(a.name)) || a.name.localeCompare(b.name));
+  const stats = statFiles.map(f => [f, readStats(f, store)]).filter(x => x[1]);
+  if (stats.length) {
+    parts.push(`<h2>All stats</h2><div class="muted" style="margin:-4px 0 6px">Keys reports are Period Weeks to Date. Red = running negative.</div>` +
+      stats.map(([f, s]) => {
+        const id = "st_" + f.name, title = f.name.replace(/\.[^.]+$/, "").replace(/^(KEYS|REAL TIME) - /, (m, g) => g === "KEYS" ? "Keys: " : "Live: ");
+        return `<details class="card" style="margin-top:8px" ${state.open[id] ? "open" : ""} ontoggle="state.open['${esc(id)}']=this.open"><summary><b>${esc(title)}</b> <span class="muted">${s.length} stats · ${ago(f.modified)}</span></summary>` +
+          `<table style="margin-top:6px">` + s.map(([k, v]) => `<tr><td>${esc(k)}</td><td style="text-align:right;${/^\(|^-\s*[$\d]/.test(v) ? "color:#c0392b" : ""}">${esc(v)}</td></tr>`).join("") + `</table></details>`;
+      }).join(""));
   }
 
   // Files and grab log.

@@ -50,7 +50,9 @@ class MainActivity : Activity() {
     companion object {
         // "A > B" taps A then B (for example a top menu, then a tab); plain names are tabs in the
         // section opened last.
-        const val DEFAULT_TABS = "REAL TIME > Sales, Labor, Hourly Sales, TM Schedule, KEYS > Costs"
+        const val DEFAULT_TABS = "REAL TIME > Sales, Labor, Hourly Sales, TM Schedule, KEYS > Summary, Sales, Total Retail Sales, Costs, Service, Product"
+        // Keys numbers only change about once a day; Real Time tabs are grabbed every cycle.
+        const val KEYS_EVERY_MS = 30 * 60 * 1000L
     }
 
     private lateinit var prefs: SharedPreferences
@@ -268,8 +270,15 @@ class MainActivity : Activity() {
     private fun doTab() {
         if (tabIdx >= tabs.size) { finishCycle(); return }
         val entry = tabs[tabIdx]
+        if (entry.trim().startsWith("KEYS", true) && isFresh(entry, KEYS_EVERY_MS)) { tabIdx++; doTab(); return }
         updateStatus("Grabbing ${entry.substringAfterLast('>').trim()}…")
         runSteps(entry, entry.split(">").map { it.trim() }.filter { it.isNotEmpty() }, 0)
+    }
+
+    private fun isFresh(entry: String, ms: Long): Boolean {
+        val base = fileName(entry).replace(Regex("[^A-Za-z0-9 &()-]"), "_")
+        val f = folder.listFiles()?.firstOrNull { it.nameWithoutExtension == base } ?: return false
+        return System.currentTimeMillis() - f.lastModified() < ms
     }
 
     private fun fileName(entry: String) = entry.split(">").joinToString(" - ") { it.trim() }
