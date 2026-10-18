@@ -269,7 +269,7 @@ class MainActivity : Activity() {
     private fun runSteps(entry: String, steps: List<String>, i: Int) {
         if (i >= steps.size) { doExport(fileName(entry)); return }
         val step = steps[i]
-        grabView.evaluateJavascript(clickTabJs(step)) { r ->
+        grabView.evaluateJavascript(clickTabJs(step, snap = i < steps.size - 1, afterMenu = i > 0)) { r ->
             val v = r?.trim('"') ?: ""
             if (v.startsWith("ok")) {
                 pageReady = null
@@ -277,7 +277,7 @@ class MainActivity : Activity() {
                 ui.postDelayed({ runSteps(entry, steps, i + 1) }, if (i < steps.size - 1) 3000 else 8000)
             } else {
                 grabView.evaluateJavascript("document.title") { title ->
-                    log("error", fileName(entry), "“$step” not found on “${title?.trim('"')}”. Seen: ${v.substringAfter('|', "none").take(220)}")
+                    log("error", fileName(entry), "“$step” not found on “${title?.trim('"')}”. ${v.substringAfter('|', "none").take(400)}")
                     nextTab()
                 }
             }
@@ -336,6 +336,8 @@ class MainActivity : Activity() {
         function __pwrTap(el){
           var r = el.getBoundingClientRect(), x = r.left + r.width/2, y = r.top + r.height/2;
           var o = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, button: 0, pointerId: 1, pointerType: 'touch', isPrimary: true };
+          ['pointerover','pointerenter'].forEach(function(n){ try { el.dispatchEvent(new PointerEvent(n, o)); } catch(e) {} });
+          ['mouseover','mouseenter'].forEach(function(n){ el.dispatchEvent(new MouseEvent(n, o)); });
           try { el.dispatchEvent(new PointerEvent('pointerdown', o)); } catch(e) {}
           el.dispatchEvent(new MouseEvent('mousedown', o));
           try { el.dispatchEvent(new PointerEvent('pointerup', o)); } catch(e) {}
@@ -344,26 +346,46 @@ class MainActivity : Activity() {
         };
     """.trimIndent() + "\n"
 
-    private fun clickTabJs(name: String) = tapJs + """
-        (function(name){
-          var norm = function(s){ return (s||'').toLowerCase().replace(/[^a-z0-9#&%() ]+/g,' ').replace(/\s+/g,' ').trim(); };
+    private val visJs = """
+        function __pwrNorm(s){ return (s||'').toLowerCase().replace(/[^a-z0-9#&%() ]+/g,' ').replace(/\s+/g,' ').trim(); }
+        function __pwrVisible(){
+          var out = [], docs = [document];
+          [].forEach.call(document.querySelectorAll('iframe'), function(f){ try { if (f.contentDocument) docs.push(f.contentDocument); } catch(e){} });
+          docs.forEach(function(d){ [].forEach.call(d.querySelectorAll('a,li,[role=menuitem],.dx-menu-item,.dx-tab,span'), function(e){
+            if (!e.getClientRects().length) return; var s = __pwrNorm(e.innerText); if (s && s.length < 40 && out.indexOf(s) < 0) out.push(s); }); });
+          return out;
+        };
+    """.trimIndent() + "\n"
+
+    // snap = true: remember what's visible before tapping a menu, so the next step can look in
+    // the newly opened dropdown first.
+    private fun clickTabJs(name: String, snap: Boolean = false, afterMenu: Boolean = false) = tapJs + visJs + """
+        (function(name, snap, afterMenu){
+          if (snap) window.__pwrBefore = __pwrVisible();
+          var before = afterMenu ? (window.__pwrBefore || []) : [];
+          var norm = __pwrNorm;
           var want = norm(name).replace(/^real time /,'');
           var docs = [document];
           [].forEach.call(document.querySelectorAll('iframe'), function(f){ try { if (f.contentDocument) docs.push(f.contentDocument); } catch(e){} });
           for (var d = 0; d < docs.length; d++) {
-            var els = docs[d].querySelectorAll('a,[role=tab],li,span,div,button');
-            var best = null;
+            var els = docs[d].querySelectorAll('a,[role=tab],[role=menuitem],.dx-menu-item,li,span,div,button');
+            var best = null, bestNew = null;
             for (var i = 0; i < els.length; i++) {
               var e = els[i]; if (!e.getClientRects().length) continue;
               var t = norm(e.innerText);
-              if ((t === want || t.replace(/^(real time|keys) /,'') === want) && (!best || best.contains(e))) best = e;
+              if (t === want || t.replace(/^real time /,'') === want) {
+                if (!best || best.contains(e)) best = e;
+                if (before.indexOf(t) < 0 && (!bestNew || bestNew.contains(e))) bestNew = e;
+              }
             }
+            if (bestNew) best = bestNew;
             if (best) { var t = best.closest('a,[role=tab],li,button,.dx-tab,.dx-item') || best; __pwrTap(t); return 'ok'; }
           }
-          var seen = [];
-          for (var d2 = 0; d2 < docs.length; d2++) [].forEach.call(docs[d2].querySelectorAll('.dx-tab,[role=tab],.dx-menu-item,nav a,ul li a'), function(e){ var s = norm(e.innerText); if (s && s.length < 40 && seen.indexOf(s) < 0) seen.push(s); });
-          return 'notfound|' + seen.slice(0, 20).join(', ');
-        })(${JSONObject.quote(name)})
+          var seen;
+          if (afterMenu) { var now = __pwrVisible(); seen = now.filter(function(s){ return before.indexOf(s) < 0; }); seen = ['menu opened: ' + (seen.length ? seen.slice(0, 25).join(', ') : 'nothing new appeared')]; }
+          else { seen = []; for (var d2 = 0; d2 < docs.length; d2++) [].forEach.call(docs[d2].querySelectorAll('.dx-tab,[role=tab],.dx-menu-item,nav a,ul li a'), function(e){ var s = norm(e.innerText); if (s && s.length < 40 && seen.indexOf(s) < 0) seen.push(s); }); }
+          return 'notfound|' + seen.slice(0, 25).join(', ');
+        })(${JSONObject.quote(name)}, $snap, $afterMenu)
     """.trimIndent()
 
     // Finds the export button by its label/icon (xls, excel, export) and taps it.
