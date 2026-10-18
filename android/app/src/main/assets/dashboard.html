@@ -242,8 +242,11 @@ function readSchedule(c, now) {
     const working = inT && (!outT || outT > now);
     const end = working ? now : outT;
     const worked = inT ? Math.max(0, (end - inT) / 3600e3) : 0;
-    const left = working && sOut && sOut > now ? (sOut - now) / 3600e3 : 0;
-    shifts.push({ name, role, inT, outT: working ? null : outT, sIn, sOut, working, worked, left });
+    // Still to come: the rest of an on-the-clock shift, or a whole scheduled shift nobody has clocked in for yet.
+    const upcoming = !inT && sIn && sOut && sOut > now;
+    const left = working && sOut && sOut > now ? (sOut - now) / 3600e3
+      : upcoming ? (sOut - Math.max(sIn, now)) / 3600e3 : 0;
+    shifts.push({ name, role, inT, outT: working ? null : outT, sIn, sOut, working, upcoming, worked, left });
   }
   if (!shifts.length) return null;
   return { shifts, hoursNow: shifts.reduce((a, s) => a + s.worked, 0), remaining: shifts.reduce((a, s) => a + s.left, 0), cols: c.hdr };
@@ -276,7 +279,7 @@ function render() {
   // Closed = everyone who worked today has clocked out. From TM Schedule, or else from Hourly Sales
   // (crew earlier, nobody this hour).
   const workedToday = R.schedule ? R.schedule.shifts.some(s => s.inT) : !!R.hourly?.rows.some(r => r.crew > 0);
-  const onNow = R.schedule ? R.schedule.shifts.some(s => s.working) : !!R.hourly?.rows.some(r => r.current && r.crew > 0);
+  const onNow = R.schedule ? R.schedule.shifts.some(s => s.working || s.upcoming) : !!R.hourly?.rows.some(r => r.current && r.crew > 0);
   const closed = workedToday && !onNow && R.splh != null;
   if (closed) A.setPref("lastFinal", JSON.stringify({ day: businessStart().toDateString(), splh: R.splh, sales: R.salesNow, labor: R.laborNow }));
   // Before anyone clocks in, keep showing the last day's final numbers.
@@ -291,7 +294,7 @@ function render() {
   if (hRow) k.push(kpi(hRow.current ? `This hour (${hRow.label}, so far)` : `Last hour (${hRow.label})`, money(hRow.sales / hRow.hours), vsGoal(hRow.sales / hRow.hours, goal), `${money(hRow.sales)} on ${hrs(hRow.hours)} hrs, crew ${hrs(hRow.crew)}`));
   if (R.laborClose && !closed) {
     const projSales = R.salesNow + (R.lyRest ?? 0);
-    k.push(kpi("At close (on schedule)", money(projSales / R.laborClose), R.lyRest != null ? `if late sales match last year (+${money(R.lyRest)})` : "if no more sales", `${hrs(R.laborClose)} labor hrs total`));
+    k.push(kpi("At close (on schedule)", money(projSales / R.laborClose), R.lyRest != null ? `if late sales match last year (+${money(R.lyRest)})` : "if no more sales", `${hrs(R.laborClose)} labor hrs total` + (R.schedule && R.schedule.shifts.some(s => s.upcoming) ? `, incl. ${hrs(R.schedule.shifts.filter(s => s.upcoming).reduce((a, s) => a + s.left, 0))} from shifts not started yet` : "")));
   }
   if (R.periodSplh != null) k.push(kpi("Period SPLH (Keys)", money(R.periodSplh), vsGoal(R.periodSplh, goal), "Period weeks to date"));
   parts.push(`<div class="grid" style="margin-top:10px">${k.join("")}</div>`);
@@ -340,7 +343,7 @@ function render() {
   // Shifts.
   if (R.schedule) {
     parts.push(`<h2>Shifts (from TM Schedule)</h2><div class="card scroll"><table><tr><th>Team member</th><th>In</th><th>Out</th><th>Sched out</th><th>Hours</th></tr>` +
-      R.schedule.shifts.map(s => `<tr><td>${esc(s.name)}</td><td>${clock(s.inT)}</td><td>${s.working ? "on" : clock(s.outT)}</td><td>${clock(s.sOut)}</td><td>${hrs(s.worked)}</td></tr>`).join("") +
+      R.schedule.shifts.map(s => `<tr><td>${esc(s.name)}</td><td>${s.upcoming ? `<span class="muted">sched ${clock(s.sIn)}</span>` : clock(s.inT)}</td><td>${s.working ? "on" : s.upcoming ? "" : clock(s.outT)}</td><td>${clock(s.sOut)}</td><td>${hrs(s.worked)}</td></tr>`).join("") +
       `<tr><th>Total so far</th><th></th><th></th><th></th><th>${hrs(R.schedule.hoursNow)}</th></tr></table></div>`);
   }
 
