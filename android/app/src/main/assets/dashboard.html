@@ -75,7 +75,10 @@ function loadFiles() {
       // Same cells as PWR shows them ("60.2%", "(2.2%)", "$64.19"), for the stats lists.
       const shown = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: null });
       const idx = raw.map((r, i) => keep(r) ? i : -1).filter(i => i >= 0);
-      out.push({ ...f, rows: idx.map(i => raw[i]), text: idx.map(i => shown[i] || raw[i]) });
+      const rows = idx.map(i => raw[i]);
+      // A saved sign-in page from a failed export is not a report.
+      if (/please sign in|sign in/i.test(rows.slice(0, 5).flat().join(" "))) { out.push({ ...f, rows: [], err: "sign-in page, not a report (replaced on the next good grab)" }); continue; }
+      out.push({ ...f, rows, text: idx.map(i => shown[i] || raw[i]) });
     } catch (e) { out.push({ ...f, rows: [], err: String(e) }); }
   }
   return out;

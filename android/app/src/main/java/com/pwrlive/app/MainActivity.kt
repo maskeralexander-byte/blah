@@ -771,6 +771,14 @@ class MainActivity : Activity() {
                 val bytes = if (meta.contains("base64")) Base64.decode(data, Base64.DEFAULT) else java.net.URLDecoder.decode(data, "UTF-8").toByteArray()
                 saveFile(tab, bytes, meta.substringBefore(';'), "data")
             }
+            // In the grabber, fetch PWR links from inside the page so the signed-in session goes with them.
+            view === grabView && url.contains("pwr.dominos.com", true) -> view.evaluateJavascript("""
+                (function(u){ try {
+                  fetch(u, { credentials: 'include' }).then(function(r){ return r.blob(); })
+                    .then(function(b){ var r = new FileReader(); r.onload = function(){ PWRGrab.onBlob(String(r.result).split(',')[1], b.type || '', ''); }; r.onerror = function(){ PWRGrab.onBlobError('read failed'); }; r.readAsDataURL(b); })
+                    .catch(function(e){ PWRGrab.onBlobError(String(e)); });
+                } catch(e) { PWRGrab.onBlobError(String(e)); } })(${JSONObject.quote(url)})
+            """.trimIndent(), null)
             else -> Thread {
                 try {
                     val conn = URL(url).openConnection() as HttpURLConnection
@@ -788,16 +796,21 @@ class MainActivity : Activity() {
 
     private fun saveFile(tab: String, bytes: ByteArray, mime: String, how: String) {
         val head = String(bytes.copyOfRange(0, minOf(bytes.size, 64)), Charsets.ISO_8859_1).trimStart()
+        // A web page instead of a spreadsheet: PWR's sign-in page (or another page), not a report.
+        val page = if (head.startsWith("<")) String(bytes.copyOfRange(0, minOf(bytes.size, 300000)), Charsets.ISO_8859_1) else ""
+        val signIn = page.isNotEmpty() && (Regex("sign\\s*in|log\\s*in|type=[\"']?password", RegexOption.IGNORE_CASE).containsMatchIn(page) || !page.contains("<table", true))
         val ext = when {
             head.startsWith("PK") -> "xlsx"
             head.startsWith("ÐÏ") -> "xls"
-            head.startsWith("<") -> if (head.contains("html", true) && head.contains("login", true)) "login" else "xls"
+            head.startsWith("<") -> if (signIn) "login" else "xls"
             mime.contains("csv") -> "csv"
             head.isNotEmpty() && (head[0].isLetter() || head[0] == '"') -> "csv"
             else -> "bin"
         }
         ui.post {
             if (ext == "login" || bytes.size < 50) {
+                // Keep the last good file and read the numbers off the page instead.
+                if (pendingTab == tab) { readGrid(tab, "XLS export came back as a sign-in page"); return@post }
                 log("error", tab, "PWR sent a sign-in page instead of the file ($how)")
             } else {
                 val safe = tab.replace(Regex("[^A-Za-z0-9 &()-]"), "_")
