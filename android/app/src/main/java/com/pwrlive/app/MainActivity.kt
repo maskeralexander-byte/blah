@@ -51,8 +51,7 @@ class MainActivity : Activity() {
         // "A > B" taps A then B (for example a top menu, then a tab); plain names are tabs in the
         // section opened last.
         const val DEFAULT_TABS = "REAL TIME > Sales, Labor, Hourly Sales, TM Schedule, KEYS > Summary, Sales, Total Retail Sales, Costs, Service, Product"
-        // Keys numbers only change about once a day; Real Time tabs are grabbed every cycle.
-        const val KEYS_EVERY_MS = 30 * 60 * 1000L
+
     }
 
     private lateinit var prefs: SharedPreferences
@@ -68,6 +67,7 @@ class MainActivity : Activity() {
 
     // ---- Grab cycle state ----
     private var busy = false
+    private var forceKeys = false
     private var tabs: List<String> = emptyList()
     private var tabIdx = 0
     private var pendingTab: String? = null
@@ -249,7 +249,7 @@ class MainActivity : Activity() {
             toastStatus("Open PWR, sign in, go to Real Time, then tap “Use this PWR page” on the Dashboard.")
             return
         }
-        busy = true; cycleStarted = System.currentTimeMillis()
+        busy = true; cycleStarted = System.currentTimeMillis(); forceKeys = force
         tabs = tabList(); tabIdx = 0
         updateStatus("Grabbing…")
         pageReady = { firstTab() }
@@ -270,15 +270,23 @@ class MainActivity : Activity() {
     private fun doTab() {
         if (tabIdx >= tabs.size) { finishCycle(); return }
         val entry = tabs[tabIdx]
-        if (entry.trim().startsWith("KEYS", true) && isFresh(entry, KEYS_EVERY_MS)) { tabIdx++; doTab(); return }
+        // Keys numbers change about once a day: grab them once per business day (from 6 AM), or on Grab now.
+        if (entry.trim().startsWith("KEYS", true) && !forceKeys && grabbedSince(entry, businessDayStart())) { tabIdx++; doTab(); return }
         updateStatus("Grabbing ${entry.substringAfterLast('>').trim()}…")
         runSteps(entry, entry.split(">").map { it.trim() }.filter { it.isNotEmpty() }, 0)
     }
 
-    private fun isFresh(entry: String, ms: Long): Boolean {
+    private fun grabbedSince(entry: String, since: Long): Boolean {
         val base = fileName(entry).replace(Regex("[^A-Za-z0-9 &()-]"), "_")
         val f = folder.listFiles()?.firstOrNull { it.nameWithoutExtension == base } ?: return false
-        return System.currentTimeMillis() - f.lastModified() < ms
+        return f.lastModified() >= since
+    }
+
+    private fun businessDayStart(): Long {
+        val c = java.util.Calendar.getInstance()
+        if (c.get(java.util.Calendar.HOUR_OF_DAY) < 6) c.add(java.util.Calendar.DAY_OF_MONTH, -1)
+        c.set(java.util.Calendar.HOUR_OF_DAY, 6); c.set(java.util.Calendar.MINUTE, 0); c.set(java.util.Calendar.SECOND, 0); c.set(java.util.Calendar.MILLISECOND, 0)
+        return c.timeInMillis
     }
 
     private fun fileName(entry: String) = entry.split(">").joinToString(" - ") { it.trim() }

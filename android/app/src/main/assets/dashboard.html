@@ -349,7 +349,7 @@ function render() {
     .sort((a, b) => (/^KEYS/i.test(b.name) - /^KEYS/i.test(a.name)) || a.name.localeCompare(b.name));
   const stats = statFiles.map(f => [f, readStats(f, store)]).filter(x => x[1]);
   if (stats.length) {
-    parts.push(`<h2>All stats</h2><div class="muted" style="margin:-4px 0 6px">Keys reports are Period Weeks to Date. Red = running negative.</div>` +
+    parts.push(`<h2>All stats</h2><div class="muted" style="margin:-4px 0 6px">Keys reports are Period Weeks to Date, grabbed once a day (Grab now refreshes them). Red = running negative.</div>` +
       stats.map(([f, s]) => {
         const id = "st_" + f.name, title = f.name.replace(/\.[^.]+$/, "").replace(/^(KEYS|REAL TIME) - /, (m, g) => g === "KEYS" ? "Keys: " : "Live: ");
         return `<details class="card" style="margin-top:8px" ${state.open[id] ? "open" : ""} ontoggle="state.open['${esc(id)}']=this.open"><summary><b>${esc(title)}</b> <span class="muted">${s.length} stats · ${ago(f.modified)}</span></summary>` +
