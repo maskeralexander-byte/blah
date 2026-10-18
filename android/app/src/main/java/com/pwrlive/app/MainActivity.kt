@@ -98,7 +98,10 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
         }
         tabDash = barButton("Dashboard") { show(dash = true) }
-        tabPwr = barButton("PWR") { show(dash = false) }
+        tabPwr = barButton("PWR") {
+            // Tapping PWR again reloads it (e.g. if it was left on a blank page).
+            if (pwrView.visibility == View.VISIBLE) reloadPwr() else show(dash = false)
+        }
         val grabBtn = barButton("Grab now") { startCycle(force = true) }
         statusText = TextView(this).apply {
             setTextColor(Color.WHITE); textSize = 12f
@@ -164,7 +167,7 @@ class MainActivity : Activity() {
         pwrView.visibility = if (dash) View.GONE else View.VISIBLE
         tabDash.typeface = if (dash) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
         tabPwr.typeface = if (dash) Typeface.DEFAULT else Typeface.DEFAULT_BOLD
-        if (!dash && pwrView.url == null) pwrView.loadUrl(prefs.getString("grabUrl", null) ?: "https://pwr.dominos.com/PWR/")
+        if (!dash && pwrView.url?.startsWith("http") != true) pwrView.loadUrl(pwrHome())
         if (dash) dashJs("window.refresh && window.refresh()")
     }
 
@@ -191,9 +194,30 @@ class MainActivity : Activity() {
             override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) { rememberPwrPage(url) }
         }
         // Exports you tap yourself are kept too.
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            WebViewCompat.addDocumentStartJavaScript(pwrView, blobHook, setOf("https://pwr.dominos.com"))
+        }
         pwrView.setDownloadListener { url, ua, cd, mime, _ ->
             fetchDownload(url, ua, mime, cd, "Manual - " + (pwrView.title ?: "export"), pwrView)
+            recoverPwrIfBlank()
         }
+    }
+
+    private fun pwrHome() = prefs.getString("lastPwrUrl", null) ?: prefs.getString("grabUrl", null) ?: "https://pwr.dominos.com/PWR/"
+
+    private fun reloadPwr() {
+        val u = pwrView.url
+        if (u == null || !u.startsWith("http")) pwrView.loadUrl(pwrHome()) else pwrView.reload()
+    }
+
+    // A download can leave the view on an empty page; go back to where you were.
+    private fun recoverPwrIfBlank() {
+        ui.postDelayed({
+            pwrView.evaluateJavascript("(document.body && document.body.innerText.trim().length) || 0") { n ->
+                val blank = (n?.trim('"')?.toIntOrNull() ?: 0) < 20 || pwrView.url?.startsWith("http") != true
+                if (blank) { if (pwrView.canGoBack()) pwrView.goBack() else pwrView.loadUrl(pwrHome()) }
+            }
+        }, 2000)
     }
 
     private fun rememberPwrPage(url: String?) {
