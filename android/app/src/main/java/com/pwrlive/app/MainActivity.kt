@@ -344,7 +344,7 @@ class MainActivity : Activity() {
           var fresh = function(re){
             var best = null;
             [].forEach.call(document.querySelectorAll('.dx-treeview-item,.dx-menu-item,[role=menuitem],[role=treeitem],a,li,span,div,button'), function(e){
-              if (!vis(e) || !re.test(norm(e.innerText))) return;
+              if (!vis(e) || !inPopup(e) || !re.test(norm(e.innerText))) return;
               if (!best || best.contains(e)) best = e;
             });
             return best;
@@ -526,13 +526,79 @@ class MainActivity : Activity() {
         })()
     """.trimIndent()
 
+    // TM Schedule: a timeline of shifts (DevExtreme scheduler) plus "Active Shifts" cards.
+    // Rows named "Name (Scheduled)" are the schedule, other rows are actual clock times.
+    // Only shifts in today's business day (6 AM to 6 AM) are kept.
+    private val schedJs = """
+        function dxKinds(){
+          var k = {}; [].forEach.call(document.querySelectorAll('[class*="dx-"]'), function(e){ String(e.className && e.className.baseVal !== undefined ? e.className.baseVal : e.className).split(/\s+/).forEach(function(c){ if (/^dx-[a-z]+$/.test(c) && !/^dx-(widget|state|item|button|icon|template|texteditor|overlay|popup|scrollable|scrollview|menu|tab|tabs|treeview|checkbox|list)$/.test(c)) k[c] = 1; }); });
+          return Object.keys(k).slice(0, 12).join(' ') || 'no DevExtreme widgets';
+        }
+        function schedCsv(docs){
+          var now = new Date(), biz = new Date(now); if (biz.getHours() < 6) biz.setDate(biz.getDate() - 1); biz.setHours(6, 0, 0, 0);
+          var bizEnd = new Date(biz.getTime() + 86400e3), recs = {}, order = [];
+          var fmt = function(d){ var h = d.getHours(), m = d.getMinutes(); return ((h % 12) || 12) + ':' + (m < 10 ? '0' : '') + m + ' ' + (h < 12 ? 'AM' : 'PM'); };
+          var rec = function(n){
+            n = String(n || '').replace(/\s+/g, ' ').trim(); var m = n.match(/^(.*?)\s*\(([^)]*)\)\s*$/);
+            var base = m ? m[1] : n, tag = m ? m[2] : '';
+            if (!recs[base]) { recs[base] = { name: base, pos: '', ci: '', co: '', si: '', so: '' }; order.push(base); }
+            var r = recs[base]; if (tag && !/sched/i.test(tag)) r.pos = tag;
+            return { r: r, sched: /sched/i.test(tag) };
+          };
+          var put = function(name, st, en){
+            if (!name || !(st instanceof Date) || isNaN(st)) return;
+            if (!(en instanceof Date) || isNaN(en)) en = now;
+            if (!(en > biz && st < bizEnd)) return;
+            var x = rec(name);
+            if (x.sched) { x.r.si = fmt(st); x.r.so = fmt(en); } else { x.r.ci = fmt(st); x.r.co = en >= now ? '' : fmt(en); }
+          };
+          for (var d = 0; d < docs.length; d++) {
+            var w = docs[d].defaultView, DX = w.DevExpress;
+            [].forEach.call(docs[d].querySelectorAll('.dx-scheduler'), function(el){
+              var inst = null;
+              [el, el.closest('.dx-widget')].forEach(function(h){ try { if (!inst && h && DX) inst = DX.ui.dxScheduler.getInstance(h); } catch(e) {} });
+              if (!inst) return;
+              var items = []; try { items = inst.getDataSource ? inst.getDataSource().items() : (inst.option('dataSource') || []); } catch(e) {}
+              if (!Array.isArray(items)) items = [];
+              var sx = inst.option('startDateExpr') || 'startDate', ex = inst.option('endDateExpr') || 'endDate', tx = inst.option('textExpr') || 'text';
+              var res = (inst.option('resources') || []).map(function(r){
+                var ds = r.dataSource; try { if (ds && !Array.isArray(ds) && ds.items) ds = ds.items(); } catch(e) {}
+                return { field: r.fieldExpr || r.field, list: Array.isArray(ds) ? ds : [], val: r.valueExpr || 'id', disp: r.displayExpr || 'text' };
+              });
+              items.forEach(function(it){
+                var name = '';
+                res.forEach(function(r){
+                  var v = it[r.field]; if (Array.isArray(v)) v = v[0]; if (v == null) return;
+                  var hit = r.list.filter(function(o){ return o && o[r.val] === v; })[0];
+                  if (hit && !name) name = typeof r.disp === 'function' ? r.disp(hit) : hit[r.disp];
+                });
+                put(name || it[tx], new Date(it[sx]), it[ex] ? new Date(it[ex]) : null);
+              });
+            });
+            // Active Shifts cards: "Name (Role)" over "3:57 PM - 1:45 AM". Still on the clock.
+            [].forEach.call(docs[d].querySelectorAll('div,a,span,li,button'), function(e){
+              if (!e.getClientRects().length) return;
+              var m = (e.innerText || '').trim().match(/^([^\n]{3,60})\n\s*(\d{1,2}:\d\d\s*[AP]M)\s*-\s*(\d{1,2}:\d\d\s*[AP]M)?\s*$/i);
+              if (!m || [].some.call(e.children, function(c){ return /\d:\d\d/.test(c.innerText || '') && /\n/.test((c.innerText || '').trim()); })) return;
+              var x = rec(m[1]); if (x.sched) return;
+              if (!x.r.ci) x.r.ci = m[2].toUpperCase(); x.r.co = '';
+              if (m[3] && !x.r.so) x.r.so = m[3].toUpperCase();
+            });
+          }
+          var rows = order.map(function(k){ return recs[k]; }).filter(function(r){ return r.ci || r.si; });
+          if (!rows.length) return null;
+          var q = function(s){ s = String(s || ''); return /[",]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+          return ['Name,Position,Clock In,Clock Out,Scheduled In,Scheduled Out'].concat(rows.map(function(r){ return [r.name, r.pos, r.ci, r.co, r.si, r.so].map(q).join(','); })).join('\n');
+        }
+    """.trimIndent() + "\n"
+
     // Reads every DevExtreme data grid on the page (all columns, including ones scrolled off screen)
     // and hands it back as CSV.
-    private val gridJs = """
+    private val gridJs = schedJs + """
         (function(){ try {
           var docs = [document];
           [].forEach.call(document.querySelectorAll('iframe'), function(f){ try { if (f.contentDocument) docs.push(f.contentDocument); } catch(e){} });
-          var out = null;
+          var out = schedCsv(docs);
           for (var d = 0; d < docs.length && !out; d++) {
             var w = docs[d].defaultView, DX = w.DevExpress;
             var grids = docs[d].querySelectorAll('.dx-datagrid');
@@ -554,7 +620,7 @@ class MainActivity : Activity() {
               out = lines.join('\n');
             }
           }
-          if (out) PWRGrab.onGrid(out); else PWRGrab.onGridError('no readable table on this tab');
+          if (out) PWRGrab.onGrid(out); else PWRGrab.onGridError('no readable table on this tab (page has: ' + dxKinds() + ')');
         } catch(e) { PWRGrab.onGridError(String(e)); } })()
     """.trimIndent()
 
