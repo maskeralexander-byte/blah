@@ -305,7 +305,7 @@ function render() {
   parts.push(`<details class="card" style="margin-top:10px" ${state.open.set ? "open" : ""} ontoggle="state.open.set=this.open"><summary>Settings</summary>
     <div class="row" style="margin-top:8px"><label>Store <input id="store" value="${esc(store)}" size="6" onchange="PWRApp.setPref('store',this.value);render()"></label>
     <label>SPLH goal $<input id="goal" value="${esc(goal)}" size="5" inputmode="decimal" onchange="PWRApp.setPref('goal',this.value);render()"></label></div>
-    <div style="margin-top:8px"><label>Tabs to grab, comma-separated. Use “MENU > Tab” to open a top menu first (for example REAL TIME > Sales)<br><input id="tabs" style="width:100%" value="${esc(A.tabs())}" onchange="PWRApp.setTabs(this.value)"></label></div>
+    <div style="margin-top:8px"><label>Tabs to grab, comma-separated. Use “MENU > Tab” to open a top menu first; the menu carries on to the next tabs (REAL TIME > Sales, Labor = both under REAL TIME)<br><input id="tabs" style="width:100%" value="${esc(A.tabs())}" onchange="PWRApp.setTabs(this.value)"></label></div>
     <div class="row" style="margin-top:8px"><label><input type="checkbox" ${A.isKeepScreenOn() ? "checked" : ""} onchange="PWRApp.keepScreenOn(this.checked)"> Keep screen on while open</label></div>
     <div class="muted" style="margin-top:8px">Grabs run every 2 minutes while the app is open. Page: <b>${esc((A.grabPageTitle && A.grabPageTitle()) || "")}</b> ${esc(grabUrl || "not set")}</div>
     <div class="muted" style="margin-top:4px">To change it: open PWR, go to Real Time for your store, come back and tap Use this PWR page.</div></details>`);

@@ -228,9 +228,17 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun tabList(): List<String> =
-        (prefs.getString("tabs", null) ?: DEFAULT_TABS)
+    // "REAL TIME > Sales, Labor" means Labor is also under REAL TIME: a menu carries forward
+    // until the next entry names another one.
+    private fun tabList(): List<String> {
+        var menu = ""
+        return (prefs.getString("tabs", null) ?: DEFAULT_TABS)
             .split(",").map { it.trim() }.filter { it.isNotEmpty() }
+            .map { e ->
+                if (e.contains(">")) { menu = e.substringBeforeLast(">").trim(); e }
+                else if (menu.isNotEmpty()) "$menu > $e" else e
+            }
+    }
 
     private fun startCycle(force: Boolean = false) {
         if (busy) { if (force) toastStatus("Already grabbing…"); return }
@@ -361,7 +369,13 @@ class MainActivity : Activity() {
     // the newly opened dropdown first.
     private fun clickTabJs(name: String, snap: Boolean = false, afterMenu: Boolean = false) = tapJs + visJs + """
         (function(name, snap, afterMenu){
-          if (snap) window.__pwrBefore = __pwrVisible();
+          if (snap) {
+            window.__pwrBefore = __pwrVisible();
+            // Mark what's on screen now; anything unmarked after the tap came from the menu.
+            var mdocs = [document];
+            [].forEach.call(document.querySelectorAll('iframe'), function(f){ try { if (f.contentDocument) mdocs.push(f.contentDocument); } catch(e){} });
+            mdocs.forEach(function(md){ [].forEach.call(md.querySelectorAll('a,[role=tab],[role=menuitem],.dx-menu-item,li,span,div,button'), function(e){ e.__pwrOld = !!e.getClientRects().length; }); });
+          }
           var before = afterMenu ? (window.__pwrBefore || []) : [];
           var norm = __pwrNorm;
           var want = norm(name).replace(/^real time /,'');
@@ -375,10 +389,11 @@ class MainActivity : Activity() {
               var t = norm(e.innerText);
               if (t === want || t.replace(/^real time /,'') === want) {
                 if (!best || best.contains(e)) best = e;
-                if (before.indexOf(t) < 0 && (!bestNew || bestNew.contains(e))) bestNew = e;
+                if (!e.__pwrOld && (!bestNew || bestNew.contains(e))) bestNew = e;
               }
             }
-            if (bestNew) best = bestNew;
+            // After a menu, only take what the menu just showed, never a same-named word elsewhere.
+            if (afterMenu) best = bestNew; else if (bestNew) best = bestNew;
             if (best) { var t = best.closest('a,[role=tab],li,button,.dx-tab,.dx-item') || best; __pwrTap(t); return 'ok'; }
           }
           var seen;
