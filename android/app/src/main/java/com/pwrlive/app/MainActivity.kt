@@ -295,24 +295,27 @@ class MainActivity : Activity() {
     // PWR opens on the team view (all stores added together). Pick the store the way a person
     // would: team selector -> Select from List -> check the store -> Apply. Skipped when the
     // selector already shows the store.
-    private fun selectStore(then: () -> Unit) {
+    private fun selectStore(then: () -> Unit, tries: Int = 0) {
         val store = prefs.getString("p_store", null)?.trim()?.takeIf { it.isNotEmpty() } ?: "2058"
         grabView.evaluateJavascript(storeJs(store, "open")) { r ->
             val v = r?.trim('"') ?: ""
             when {
                 v.startsWith("already") -> then()
                 v.startsWith("opened") -> ui.postDelayed({ storeList(store, 0, then) }, 2500)
+                // The page may still be loading; give it a few more seconds.
+                tries < 3 -> ui.postDelayed({ selectStore(then, tries + 1) }, 4000)
                 else -> { log("error", "Store", "Couldn't find the store picker. ${v.substringAfter('|', "").take(300)}"); then() }
             }
         }
     }
 
     private fun storeList(store: String, tries: Int, then: () -> Unit) {
-        grabView.evaluateJavascript(storeJs(store, "list")) { r ->
+        // Only the first try may tap "Select Store"; tapping it again would fold the list back up.
+        grabView.evaluateJavascript(storeJs(store, if (tries == 0) "list" else "listonly")) { r ->
             val v = r?.trim('"') ?: ""
             when {
                 v.startsWith("ok") -> ui.postDelayed({ storePick(store, then) }, 3500)
-                v.startsWith("expand") && tries < 2 -> ui.postDelayed({ storeList(store, tries + 1, then) }, 1500)
+                v.startsWith("expand") && tries < 3 -> ui.postDelayed({ storeList(store, tries + 1, then) }, 1500)
                 else -> { log("error", "Store", "“Select from List” not found. ${v.substringAfter('|', "").take(300)}"); then() }
             }
         }
@@ -346,11 +349,11 @@ class MainActivity : Activity() {
             });
             return best;
           };
-          if (phase === 'list') {
+          if (phase === 'list' || phase === 'listonly') {
             var item = fresh(/^select from list$/);
             if (item) { __pwrTap(item.closest('.dx-treeview-item,.dx-menu-item,[role=menuitem],[role=treeitem],li,a') || item); return 'ok'; }
             var grp = fresh(/^select store$/);
-            if (grp) { __pwrTap(grp.closest('.dx-treeview-item,.dx-menu-item,[role=menuitem],[role=treeitem],li,a') || grp); return 'expand'; }
+            if (grp) { if (phase === 'list') __pwrTap(grp.closest('.dx-treeview-item,.dx-menu-item,[role=menuitem],[role=treeitem],li,a') || grp); return 'expand|menu shows: ' + __pwrVisible().slice(0, 30).join(', '); }
             return 'notfound|menu shows: ' + __pwrVisible().slice(0, 30).join(', ');
           }
           // phase 'pick': the "Select from List" popup with a store grid.
@@ -383,7 +386,7 @@ class MainActivity : Activity() {
         })(${JSONObject.quote(store)}, ${JSONObject.quote(phase)})
     """.trimIndent()
 
-    private fun doExport(tab: String) {
+    private fun doExport(tab: String, retry: Boolean = false) {
         pendingTab = tab
         grabView.evaluateJavascript(clickExportJs) { r ->
             if (r == null || r.contains("notfound")) {
@@ -392,7 +395,9 @@ class MainActivity : Activity() {
                 val token = System.nanoTime()
                 exportToken = token
                 ui.postDelayed({
-                    if (pendingTab == tab && exportToken == token) readGrid(tab, "XLS export didn't arrive")
+                    if (pendingTab == tab && exportToken == token) {
+                        if (!retry) doExport(tab, retry = true) else readGrid(tab, "XLS export didn't arrive")
+                    }
                 }, 15000)
             }
         }
@@ -563,6 +568,8 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun onGrid(csv: String) {
             val tab = pendingTab ?: return
+            // An empty table must not replace the last good report.
+            if (csv.lines().count { it.isNotBlank() } < 2) { onGridError("the table was empty, kept the previous file"); return }
             saveFile(tab, csv.toByteArray(Charsets.UTF_8), "text/csv", "read from table; $gridWhy")
         }
         @JavascriptInterface
