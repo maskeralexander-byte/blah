@@ -47,6 +47,12 @@ import java.util.Locale
  */
 class MainActivity : Activity() {
 
+    companion object {
+        // "A > B" taps A then B (for example a top menu, then a tab); plain names are tabs in the
+        // section opened last.
+        const val DEFAULT_TABS = "REAL TIME > Sales, Labor, Hourly Sales, TM Schedule, KEYS > Costs"
+    }
+
     private lateinit var prefs: SharedPreferences
     private lateinit var pwrView: WebView
     private lateinit var grabView: WebView
@@ -223,7 +229,7 @@ class MainActivity : Activity() {
     }
 
     private fun tabList(): List<String> =
-        (prefs.getString("tabs", null) ?: "Sales, Labor, Hourly Sales, TM Schedule")
+        (prefs.getString("tabs", null) ?: DEFAULT_TABS)
             .split(",").map { it.trim() }.filter { it.isNotEmpty() }
 
     private fun startCycle(force: Boolean = false) {
@@ -253,18 +259,27 @@ class MainActivity : Activity() {
 
     private fun doTab() {
         if (tabIdx >= tabs.size) { finishCycle(); return }
-        val tab = tabs[tabIdx]
-        updateStatus("Grabbing $tab…")
-        grabView.evaluateJavascript(clickTabJs(tab)) { r ->
+        val entry = tabs[tabIdx]
+        updateStatus("Grabbing ${entry.substringAfterLast('>').trim()}…")
+        runSteps(entry, entry.split(">").map { it.trim() }.filter { it.isNotEmpty() }, 0)
+    }
+
+    private fun fileName(entry: String) = entry.split(">").joinToString(" - ") { it.trim() }
+
+    private fun runSteps(entry: String, steps: List<String>, i: Int) {
+        if (i >= steps.size) { doExport(fileName(entry)); return }
+        val step = steps[i]
+        grabView.evaluateJavascript(clickTabJs(step)) { r ->
             val v = r?.trim('"') ?: ""
             if (v.startsWith("ok")) {
                 pageReady = null
-                // A tab can redraw in place or reload the page; wait for either.
-                ui.postDelayed({ doExport(tab) }, 8000)
+                // A menu needs a moment to open; a tab can redraw or reload the page.
+                ui.postDelayed({ runSteps(entry, steps, i + 1) }, if (i < steps.size - 1) 3000 else 8000)
             } else {
-                val page = prefs.getString("grabPageTitle", "") ?: ""
-                log("error", tab, "Tab not found on “$page”. Tabs seen: ${v.substringAfter('|', "none").take(200)}")
-                nextTab()
+                grabView.evaluateJavascript("document.title") { title ->
+                    log("error", fileName(entry), "“$step” not found on “${title?.trim('"')}”. Seen: ${v.substringAfter('|', "none").take(220)}")
+                    nextTab()
+                }
             }
         }
     }
@@ -309,6 +324,8 @@ class MainActivity : Activity() {
 
     private fun finishCycle() {
         busy = false; pendingTab = null
+        val keep = tabs.map { fileName(it).replace(Regex("[^A-Za-z0-9 &()-]"), "_") }.toSet()
+        folder.listFiles()?.filter { !it.name.startsWith("Manual") && it.nameWithoutExtension !in keep }?.forEach { it.delete() }
         prefs.edit().putLong("lastCycle", System.currentTimeMillis()).apply()
         updateStatus()
         dashJs("window.refresh && window.refresh()")
@@ -329,7 +346,7 @@ class MainActivity : Activity() {
 
     private fun clickTabJs(name: String) = tapJs + """
         (function(name){
-          var norm = function(s){ return (s||'').replace(/\s+/g,' ').trim().toLowerCase(); };
+          var norm = function(s){ return (s||'').toLowerCase().replace(/[^a-z0-9#&%() ]+/g,' ').replace(/\s+/g,' ').trim(); };
           var want = norm(name).replace(/^real time /,'');
           var docs = [document];
           [].forEach.call(document.querySelectorAll('iframe'), function(f){ try { if (f.contentDocument) docs.push(f.contentDocument); } catch(e){} });
@@ -338,13 +355,13 @@ class MainActivity : Activity() {
             var best = null;
             for (var i = 0; i < els.length; i++) {
               var e = els[i]; if (!e.getClientRects().length) continue;
-              var t = norm(e.innerText).replace(/^real time /,'');
-              if (t === want && (!best || best.contains(e))) best = e;
+              var t = norm(e.innerText);
+              if ((t === want || t.replace(/^(real time|keys) /,'') === want) && (!best || best.contains(e))) best = e;
             }
             if (best) { var t = best.closest('a,[role=tab],li,button,.dx-tab,.dx-item') || best; __pwrTap(t); return 'ok'; }
           }
           var seen = [];
-          for (var d2 = 0; d2 < docs.length; d2++) [].forEach.call(docs[d2].querySelectorAll('.dx-tab,[role=tab],nav a,ul li a'), function(e){ var s = norm(e.innerText); if (s && s.length < 40 && seen.indexOf(s) < 0) seen.push(s); });
+          for (var d2 = 0; d2 < docs.length; d2++) [].forEach.call(docs[d2].querySelectorAll('.dx-tab,[role=tab],.dx-menu-item,nav a,ul li a'), function(e){ var s = norm(e.innerText); if (s && s.length < 40 && seen.indexOf(s) < 0) seen.push(s); });
           return 'notfound|' + seen.slice(0, 20).join(', ');
         })(${JSONObject.quote(name)})
     """.trimIndent()

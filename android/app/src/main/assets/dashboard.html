@@ -85,6 +85,7 @@ function classify(f) {
   if (H.includes(norm("Hour (Local Time)"))) return { type: "hourly", hdr, body };
   if (H.includes("store") && H.some(h => h.startsWith("todaysroyaltysales"))) return { type: "sales", hdr, body };
   if (H.some(h => h.includes("currentlaborhours"))) return { type: "labor", hdr, body };
+  if (H.some(h => h.includes("salesperlaborhr"))) return { type: "keys", hdr, body };
   if (/schedule/i.test(f.name) || H.some(h => /clock|punch|shift|sched/.test(h))) return { type: "schedule", hdr, body };
   return { type: "other", hdr, body };
 }
@@ -128,6 +129,11 @@ function analyze(files, store) {
     if (c.type === "sales") res.sales = readSales(c, store);
     if (c.type === "schedule") res.schedule = readSchedule(c, now);
     if (c.type === "labor") res.labor = c;
+    if (c.type === "keys") {
+      const iS = c.hdr.findIndex(h => /sales per labor/i.test(h)), iSt = c.hdr.findIndex(h => /^store$/i.test(h));
+      const row = c.body.find(r => String(r[iSt] ?? "").replace(/\D/g, "") === String(store)) || c.body[0];
+      if (row && iS >= 0) res.periodSplh = num(row[iS]);
+    }
   }
   // Sales right now: Real Time Sales if grabbed, else the hourly total.
   res.salesNow = res.sales?.today ?? res.hourly?.sales ?? null;
@@ -234,6 +240,7 @@ function render() {
     const projSales = R.salesNow + (R.lyRest ?? 0);
     k.push(kpi("At close (on schedule)", money(projSales / R.laborClose), R.lyRest != null ? `if late sales match last year (+${money(R.lyRest)})` : "if no more sales", `${hrs(R.laborClose)} labor hrs total`));
   }
+  if (R.periodSplh != null) k.push(kpi("Period SPLH (Keys)", money(R.periodSplh), vsGoal(R.periodSplh, goal), "Period weeks to date"));
   parts.push(`<div class="grid" style="margin-top:10px">${k.join("")}</div>`);
   if (R.laborSource) parts.push(`<div class="muted" style="margin-top:6px">Labor hours from ${esc(R.laborSource)}.</div>`);
 
@@ -298,7 +305,7 @@ function render() {
   parts.push(`<details class="card" style="margin-top:10px" ${state.open.set ? "open" : ""} ontoggle="state.open.set=this.open"><summary>Settings</summary>
     <div class="row" style="margin-top:8px"><label>Store <input id="store" value="${esc(store)}" size="6" onchange="PWRApp.setPref('store',this.value);render()"></label>
     <label>SPLH goal $<input id="goal" value="${esc(goal)}" size="5" inputmode="decimal" onchange="PWRApp.setPref('goal',this.value);render()"></label></div>
-    <div style="margin-top:8px"><label>Tabs to grab (names as shown in PWR, comma-separated)<br><input id="tabs" style="width:100%" value="${esc(A.tabs())}" onchange="PWRApp.setTabs(this.value)"></label></div>
+    <div style="margin-top:8px"><label>Tabs to grab, comma-separated. Use “MENU > Tab” to open a top menu first (for example REAL TIME > Sales)<br><input id="tabs" style="width:100%" value="${esc(A.tabs())}" onchange="PWRApp.setTabs(this.value)"></label></div>
     <div class="row" style="margin-top:8px"><label><input type="checkbox" ${A.isKeepScreenOn() ? "checked" : ""} onchange="PWRApp.keepScreenOn(this.checked)"> Keep screen on while open</label></div>
     <div class="muted" style="margin-top:8px">Grabs run every 2 minutes while the app is open. Page: <b>${esc((A.grabPageTitle && A.grabPageTitle()) || "")}</b> ${esc(grabUrl || "not set")}</div>
     <div class="muted" style="margin-top:4px">To change it: open PWR, go to Real Time for your store, come back and tap Use this PWR page.</div></details>`);
