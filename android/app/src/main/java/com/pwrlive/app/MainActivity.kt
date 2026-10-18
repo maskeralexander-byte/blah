@@ -314,17 +314,19 @@ class MainActivity : Activity() {
         grabView.evaluateJavascript(storeJs(store, if (tries == 0) "list" else "listonly")) { r ->
             val v = r?.trim('"') ?: ""
             when {
-                v.startsWith("ok") -> ui.postDelayed({ storePick(store, then) }, 3500)
+                v.startsWith("ok") -> ui.postDelayed({ storePick(store, 0, then) }, 3500)
                 v.startsWith("expand") && tries < 3 -> ui.postDelayed({ storeList(store, tries + 1, then) }, 1500)
                 else -> { log("error", "Store", "“Select from List” not found. ${v.substringAfter('|', "").take(300)}"); then() }
             }
         }
     }
 
-    private fun storePick(store: String, then: () -> Unit) {
+    private fun storePick(store: String, tries: Int, then: () -> Unit) {
         grabView.evaluateJavascript(storeJs(store, "pick")) { r ->
             val v = r?.trim('"') ?: ""
             if (v.startsWith("ok")) { log("ok", "Store", "Picked store $store"); ui.postDelayed(then, 8000) }
+            // The list can take a few seconds to show up.
+            else if (v.contains("no store list opened") && tries < 3) ui.postDelayed({ storePick(store, tries + 1, then) }, 2500)
             else { log("error", "Store", "Store $store not in the list. ${v.substringAfter('|', "").take(300)}"); then() }
         }
     }
@@ -625,7 +627,7 @@ class MainActivity : Activity() {
               if (!inst) continue;
               var cols = inst.getVisibleColumns ? inst.getVisibleColumns() : (inst.option('columns') || []);
               cols = cols.filter(function(c){ return c && (c.dataField || c.calculateCellValue) && !c.command && c.type !== 'groupExpand'; });
-              var items = inst.getDataSource ? inst.getDataSource().items() : [];
+              var gds = inst.getDataSource && inst.getDataSource(), items = gds ? gds.items() : [];
               var rows = [];
               (function flat(list){ (list || []).forEach(function(it){ if (it && it.items && it.key !== undefined && !it.dataField) flat(it.items); else rows.push(it); }); })(items);
               if (!rows.length || !cols.length) continue;

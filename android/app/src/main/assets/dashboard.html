@@ -256,7 +256,7 @@ function render() {
   const cur = R.hourly?.rows.find(r => r.current), lastDone = R.hourly ? [...R.hourly.rows].reverse().find(r => !r.current && r.hours > 0) : null;
   const hRow = cur && cur.hours > 0.15 ? cur : lastDone;
   if (hRow) k.push(kpi(hRow.current ? `This hour (${hRow.label}, so far)` : `Last hour (${hRow.label})`, money(hRow.sales / hRow.hours), vsGoal(hRow.sales / hRow.hours, goal), `${money(hRow.sales)} on ${hrs(hRow.hours)} hrs, crew ${hrs(hRow.crew)}`));
-  if (R.laborClose) {
+  if (R.laborClose && !closed) {
     const projSales = R.salesNow + (R.lyRest ?? 0);
     k.push(kpi("At close (on schedule)", money(projSales / R.laborClose), R.lyRest != null ? `if late sales match last year (+${money(R.lyRest)})` : "if no more sales", `${hrs(R.laborClose)} labor hrs total`));
   }
