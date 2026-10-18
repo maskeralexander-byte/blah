@@ -367,7 +367,8 @@ class MainActivity : Activity() {
           }
           var best = null;
           [].forEach.call(document.querySelectorAll('.dx-menu-item,.dx-treeview-item,[role=menuitem],li,a,span,div'), function(e){
-            if (!vis(e) || !inPopup(e) || norm(e.innerText) !== range) return;
+            // Items carry their dates: "Period Weeks to Date (Mon 10/5/2026-Sun ...)".
+            if (!vis(e) || !inPopup(e) || norm(e.innerText).indexOf(range) !== 0) return;
             if (!best || best.contains(e)) best = e;
           });
           if (best) { __pwrTap(best.closest('.dx-menu-item,.dx-treeview-item,[role=menuitem],li,a') || best); return 'ok'; }
