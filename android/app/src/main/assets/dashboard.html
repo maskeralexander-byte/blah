@@ -240,9 +240,17 @@ function render() {
 
   // Headline numbers.
   const k = [];
-  // After close (nobody on the clock), the numbers are the day's final ones until the next day starts at 6 AM.
-  const closed = R.schedule ? !R.schedule.shifts.some(s => s.working) : false;
-  k.push(kpi(closed ? "Day's final SPLH" : "SPLH now", R.splh != null ? money(R.splh) : "–", R.splh != null ? vsGoal(R.splh, goal) : "Needs sales + labor exports",
+  // Closed = everyone who worked today has clocked out. From TM Schedule, or else from Hourly Sales
+  // (crew earlier, nobody this hour).
+  const workedToday = R.schedule ? R.schedule.shifts.some(s => s.inT) : !!R.hourly?.rows.some(r => r.crew > 0);
+  const onNow = R.schedule ? R.schedule.shifts.some(s => s.working) : !!R.hourly?.rows.some(r => r.current && r.crew > 0);
+  const closed = workedToday && !onNow && R.splh != null;
+  if (closed) A.setPref("lastFinal", JSON.stringify({ day: businessStart().toDateString(), splh: R.splh, sales: R.salesNow, labor: R.laborNow }));
+  // Before anyone clocks in, keep showing the last day's final numbers.
+  let lastFinal = null; try { lastFinal = JSON.parse(pref("lastFinal", "null")); } catch (e) {}
+  if (!workedToday && lastFinal && lastFinal.day !== businessStart().toDateString())
+    k.push(kpi("Last day's final SPLH", money(lastFinal.splh), vsGoal(lastFinal.splh, goal), `${lastFinal.day}: ${money(lastFinal.sales)} on ${hrs(lastFinal.labor)} labor hrs`));
+  k.push(kpi(closed ? "Day's final SPLH (everyone's out)" : "SPLH now", R.splh != null ? money(R.splh) : "–", R.splh != null ? vsGoal(R.splh, goal) : "Needs sales + labor exports",
     R.laborNow ? `${money(R.salesNow)} on ${hrs(R.laborNow)} labor hrs` : ""));
   k.push(kpi("Sales so far", money(R.salesNow), R.sales && R.sales.pyST ? pct(R.salesNow, R.sales.pyST) + " vs last year" : "", R.sales && R.sales.pyEod ? `Last year's full day ${money(R.sales.pyEod)}` : ""));
   const cur = R.hourly?.rows.find(r => r.current), lastDone = R.hourly ? [...R.hourly.rows].reverse().find(r => !r.current && r.hours > 0) : null;
