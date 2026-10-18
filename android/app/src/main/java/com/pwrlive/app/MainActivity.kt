@@ -178,13 +178,18 @@ class MainActivity : Activity() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) = false
             override fun onPageFinished(view: WebView, url: String) {
                 CookieManager.getInstance().flush()
-                if (url.contains("pwr.dominos.com", true) && !url.contains("login", true)) prefs.edit().putString("lastPwrUrl", url).apply()
+                rememberPwrPage(url)
             }
+            override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) { rememberPwrPage(url) }
         }
         // Exports you tap yourself are kept too.
         pwrView.setDownloadListener { url, ua, cd, mime, _ ->
             fetchDownload(url, ua, mime, cd, "Manual - " + (pwrView.title ?: "export"), pwrView)
         }
+    }
+
+    private fun rememberPwrPage(url: String?) {
+        if (url != null && url.contains("pwr.dominos.com", true) && !url.contains("login", true)) prefs.edit().putString("lastPwrUrl", url).apply()
     }
 
     // ---------------------------------------------------------------- grabber
@@ -238,8 +243,10 @@ class MainActivity : Activity() {
     }
 
     private fun firstTab() {
-        grabView.evaluateJavascript("(function(){return !!document.querySelector('input[type=password]')})()") { r ->
-            if (r == "true") { log("error", "", "PWR asked to sign in. Open the PWR view and sign in again."); finishCycle() }
+        grabView.evaluateJavascript("(function(){return (document.querySelector('input[type=password]') ? 'LOGIN|' : 'OK|') + document.title})()") { r ->
+            val v = r?.trim('"') ?: ""
+            prefs.edit().putString("grabPageTitle", v.substringAfter('|')).apply()
+            if (v.startsWith("LOGIN")) { log("error", "", "PWR asked to sign in. Open the PWR view and sign in again."); finishCycle() }
             else doTab()
         }
     }
@@ -249,12 +256,14 @@ class MainActivity : Activity() {
         val tab = tabs[tabIdx]
         updateStatus("Grabbing $tab…")
         grabView.evaluateJavascript(clickTabJs(tab)) { r ->
-            if (r?.contains("ok") == true) {
+            val v = r?.trim('"') ?: ""
+            if (v.startsWith("ok")) {
                 pageReady = null
                 // A tab can redraw in place or reload the page; wait for either.
                 ui.postDelayed({ doExport(tab) }, 8000)
             } else {
-                log("error", tab, "Tab not found on the page")
+                val page = prefs.getString("grabPageTitle", "") ?: ""
+                log("error", tab, "Tab not found on “$page”. Tabs seen: ${v.substringAfter('|', "none").take(200)}")
                 nextTab()
             }
         }
@@ -264,23 +273,34 @@ class MainActivity : Activity() {
         pendingTab = tab
         grabView.evaluateJavascript(clickExportJs) { r ->
             if (r == null || r.contains("notfound")) {
-                pendingTab = null
-                log("error", tab, "XLS button not found")
-                nextTab()
+                readGrid(tab, "XLS button not found")
             } else {
                 val token = System.nanoTime()
                 exportToken = token
                 ui.postDelayed({
-                    if (pendingTab == tab && exportToken == token) {
-                        pendingTab = null
-                        log("error", tab, "Tapped XLS (${r.trim('"').take(60)}) but no file arrived")
-                        nextTab()
-                    }
-                }, 30000)
+                    if (pendingTab == tab && exportToken == token) readGrid(tab, "XLS export didn't arrive")
+                }, 15000)
             }
         }
     }
     private var exportToken = 0L
+
+    // Fallback: read the report straight from PWR's table (DevExtreme grid) and save it as CSV.
+    private fun readGrid(tab: String, why: String) {
+        pendingTab = tab
+        exportToken = System.nanoTime()
+        val token = exportToken
+        grabView.evaluateJavascript(gridJs, null)
+        ui.postDelayed({
+            if (pendingTab == tab && exportToken == token) {
+                pendingTab = null
+                log("error", tab, "$why, and the table couldn't be read either")
+                nextTab()
+            }
+        }, 15000)
+        gridWhy = why
+    }
+    private var gridWhy = ""
 
     private fun nextTab() {
         tabIdx++
@@ -294,7 +314,20 @@ class MainActivity : Activity() {
         dashJs("window.refresh && window.refresh()")
     }
 
-    private fun clickTabJs(name: String) = """
+    // Real finger-like tap: DevExtreme widgets ignore a bare click().
+    private val tapJs = """
+        function __pwrTap(el){
+          var r = el.getBoundingClientRect(), x = r.left + r.width/2, y = r.top + r.height/2;
+          var o = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, button: 0, pointerId: 1, pointerType: 'touch', isPrimary: true };
+          try { el.dispatchEvent(new PointerEvent('pointerdown', o)); } catch(e) {}
+          el.dispatchEvent(new MouseEvent('mousedown', o));
+          try { el.dispatchEvent(new PointerEvent('pointerup', o)); } catch(e) {}
+          el.dispatchEvent(new MouseEvent('mouseup', o));
+          el.dispatchEvent(new MouseEvent('click', o));
+        };
+    """.trimIndent() + "\n"
+
+    private fun clickTabJs(name: String) = tapJs + """
         (function(name){
           var norm = function(s){ return (s||'').replace(/\s+/g,' ').trim().toLowerCase(); };
           var want = norm(name).replace(/^real time /,'');
@@ -308,14 +341,16 @@ class MainActivity : Activity() {
               var t = norm(e.innerText).replace(/^real time /,'');
               if (t === want && (!best || best.contains(e))) best = e;
             }
-            if (best) { var t = best.closest('a,[role=tab],li,button') || best; t.click(); return 'ok'; }
+            if (best) { var t = best.closest('a,[role=tab],li,button,.dx-tab,.dx-item') || best; __pwrTap(t); return 'ok'; }
           }
-          return 'notfound';
+          var seen = [];
+          for (var d2 = 0; d2 < docs.length; d2++) [].forEach.call(docs[d2].querySelectorAll('.dx-tab,[role=tab],nav a,ul li a'), function(e){ var s = norm(e.innerText); if (s && s.length < 40 && seen.indexOf(s) < 0) seen.push(s); });
+          return 'notfound|' + seen.slice(0, 20).join(', ');
         })(${JSONObject.quote(name)})
     """.trimIndent()
 
     // Finds the export button by its label/icon (xls, excel, export) and taps it.
-    private val clickExportJs = """
+    private val clickExportJs = tapJs + """
         (function(){
           var docs = [document];
           [].forEach.call(document.querySelectorAll('iframe'), function(f){ try { if (f.contentDocument) docs.push(f.contentDocument); } catch(e){} });
@@ -326,15 +361,51 @@ class MainActivity : Activity() {
           for (var d = 0; d < docs.length; d++) {
             var els = [].slice.call(docs[d].querySelectorAll('a,button,span,div,img,i,input,svg'));
             var cands = els.filter(function(e){ var r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.width < 200 && /\bxlsx?\b|excel|export/i.test(label(e)); });
-            cands.sort(function(a,b){ var ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect(); return ra.width*ra.height - rb.width*rb.height; });
+            // Prefer the "Export to Excel" button itself, then the smallest match.
+            cands.sort(function(a,b){ var ea = /export to excel/i.test(label(a)) ? 0 : 1, eb = /export to excel/i.test(label(b)) ? 0 : 1; if (ea !== eb) return ea - eb; var ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect(); return ra.width*ra.height - rb.width*rb.height; });
             if (cands.length) {
-              var t = cands[0].closest('a,button,[onclick],[role=button]') || cands[0];
-              t.click();
+              var t = cands[0].closest('a,button,[onclick],[role=button],.dx-button') || cands[0];
+              // DevExtreme split buttons: tap the action half, not the outer box or the arrow.
+              var inner = t.querySelector && (t.querySelector('.dx-dropdownbutton-action') || t.querySelector('.dx-buttongroup-item:not(.dx-dropdownbutton-toggle)') || t.querySelector('.dx-button:not(.dx-dropdownbutton-toggle)'));
+              if (inner) t = inner;
+              __pwrTap(t);
               return 'clicked ' + t.tagName + ' ' + label(t).replace(/\s+/g,' ').trim();
             }
           }
           return 'notfound';
         })()
+    """.trimIndent()
+
+    // Reads every DevExtreme data grid on the page (all columns, including ones scrolled off screen)
+    // and hands it back as CSV.
+    private val gridJs = """
+        (function(){ try {
+          var docs = [document];
+          [].forEach.call(document.querySelectorAll('iframe'), function(f){ try { if (f.contentDocument) docs.push(f.contentDocument); } catch(e){} });
+          var out = null;
+          for (var d = 0; d < docs.length && !out; d++) {
+            var w = docs[d].defaultView, DX = w.DevExpress;
+            var grids = docs[d].querySelectorAll('.dx-datagrid');
+            for (var g = 0; g < grids.length && !out; g++) {
+              var el = grids[g].closest('.dx-widget') || grids[g], inst = null;
+              try { inst = DX && DX.ui && DX.ui.dxDataGrid && DX.ui.dxDataGrid.getInstance(el); } catch(e) {}
+              if (!inst && w.jQuery) { try { inst = w.jQuery(el).dxDataGrid('instance'); } catch(e) {} }
+              if (!inst) continue;
+              var cols = inst.getVisibleColumns ? inst.getVisibleColumns() : (inst.option('columns') || []);
+              cols = cols.filter(function(c){ return c && (c.dataField || c.calculateCellValue) && !c.command && c.type !== 'groupExpand'; });
+              var items = inst.getDataSource ? inst.getDataSource().items() : [];
+              var rows = [];
+              (function flat(list){ (list || []).forEach(function(it){ if (it && it.items && it.key !== undefined && !it.dataField) flat(it.items); else rows.push(it); }); })(items);
+              if (!rows.length || !cols.length) continue;
+              var fmt = function(v){ if (v == null) return ''; if (v instanceof Date) { var p = function(n){ return (n < 10 ? '0' : '') + n; }; return v.getFullYear()+'-'+p(v.getMonth()+1)+'-'+p(v.getDate())+'T'+p(v.getHours())+':'+p(v.getMinutes())+':'+p(v.getSeconds()); } return String(v); };
+              var q = function(s){ s = fmt(s); return /[",\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s; };
+              var lines = [cols.map(function(c){ return q(c.caption || c.dataField); }).join(',')];
+              rows.forEach(function(r){ lines.push(cols.map(function(c){ var v; try { v = c.calculateCellValue ? c.calculateCellValue(r) : r[c.dataField]; } catch(e) { v = r[c.dataField]; } return q(v); }).join(',')); });
+              out = lines.join('\n');
+            }
+          }
+          if (out) PWRGrab.onGrid(out); else PWRGrab.onGridError('no readable table on this tab');
+        } catch(e) { PWRGrab.onGridError(String(e)); } })()
     """.trimIndent()
 
     inner class GrabBridge {
@@ -343,6 +414,16 @@ class MainActivity : Activity() {
             val tab = pendingTab ?: return
             try { saveFile(tab, Base64.decode(b64, Base64.DEFAULT), mime, "blob") }
             catch (e: Exception) { ui.post { log("error", tab, "Couldn't save the file: ${e.message}"); pendingTab = null; nextTab() } }
+        }
+        @JavascriptInterface
+        fun onGrid(csv: String) {
+            val tab = pendingTab ?: return
+            saveFile(tab, csv.toByteArray(Charsets.UTF_8), "text/csv", "read from table; $gridWhy")
+        }
+        @JavascriptInterface
+        fun onGridError(msg: String) {
+            val tab = pendingTab ?: return
+            ui.post { log("error", tab, "$gridWhy; table read failed: $msg"); pendingTab = null; nextTab() }
         }
         @JavascriptInterface
         fun onBlobError(msg: String) {
@@ -390,6 +471,7 @@ class MainActivity : Activity() {
             head.startsWith("ÐÏ") -> "xls"
             head.startsWith("<") -> if (head.contains("html", true) && head.contains("login", true)) "login" else "xls"
             mime.contains("csv") -> "csv"
+            head.isNotEmpty() && (head[0].isLetter() || head[0] == '"') -> "csv"
             else -> "bin"
         }
         ui.post {
@@ -464,9 +546,15 @@ class MainActivity : Activity() {
         @JavascriptInterface fun tabs(): String = tabList().joinToString(", ")
         @JavascriptInterface fun setTabs(v: String) { prefs.edit().putString("tabs", v).apply() }
         @JavascriptInterface fun grabUrl(): String = prefs.getString("grabUrl", "") ?: ""
+        @JavascriptInterface fun grabPageTitle(): String = prefs.getString("grabPageTitle", "") ?: ""
         @JavascriptInterface fun lastCycle(): Long = prefs.getLong("lastCycle", 0)
         @JavascriptInterface fun busy(): Boolean = busy
         @JavascriptInterface fun useCurrentPwrPage(): String {
+            val latch = java.util.concurrent.CountDownLatch(1)
+            var cur: String? = null
+            ui.post { cur = pwrView.url; latch.countDown() }
+            latch.await(2, java.util.concurrent.TimeUnit.SECONDS)
+            cur?.let { rememberPwrPage(it) }
             val u = prefs.getString("lastPwrUrl", null) ?: return ""
             prefs.edit().putString("grabUrl", u).apply()
             ui.post { startCycle(force = true) }
