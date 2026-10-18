@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PWR Live</title>
+<script src="xlsx.full.min.js"></script>
+<style>
+:root { --bg:#f3f5f8; --card:#fff; --line:#d8dee5; --ink:#111820; --ink2:#4a5663; --ink3:#6f7b88; --acc:#1b5c9e;
+  --good:#0a7d0a; --goodbg:#e2f4e2; --warn:#8a5d00; --warnbg:#fdf0d0; --bad:#b02c2c; --badbg:#fbe3e3; }
+@media (prefers-color-scheme: dark) { :root { --bg:#12161b; --card:#1a2027; --line:#313b46; --ink:#eef2f6; --ink2:#b4bfca; --ink3:#8794a2; --acc:#6aa7e6;
+  --good:#5bd35b; --goodbg:#163a1a; --warn:#f5c04a; --warnbg:#3d3214; --bad:#f08080; --badbg:#432022; } }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, Roboto, sans-serif; padding: 12px 12px 40px; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink3); margin: 18px 0 8px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; }
+.kpi .l { color: var(--ink2); font-size: 12px; }
+.kpi .v { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.kpi .n { color: var(--ink3); font-size: 12px; }
+.up { color: var(--good); } .down { color: var(--bad); }
+.btn { border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 8px; padding: 8px 12px; font: inherit; font-weight: 600; }
+.btn.primary { background: var(--acc); border-color: var(--acc); color: #fff; }
+input, select { font: inherit; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+.al { border-radius: 8px; padding: 8px 10px 8px 30px; position: relative; margin-bottom: 6px; }
+.al::before { position: absolute; left: 10px; top: 8px; font-weight: 700; }
+.al.bad { background: var(--badbg); } .al.bad::before { content: "✕"; color: var(--bad); }
+.al.warn { background: var(--warnbg); } .al.warn::before { content: "!"; color: var(--warn); }
+.al.good { background: var(--goodbg); } .al.good::before { content: "✓"; color: var(--good); }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; font-size: 13px; }
+th, td { padding: 6px 8px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { color: var(--ink2); font-size: 12px; font-weight: 600; }
+td.good { background: var(--goodbg); } td.warn { background: var(--warnbg); } td.bad { background: var(--badbg); color: var(--bad); }
+.muted { color: var(--ink3); font-size: 12px; }
+.pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--line); }
+.pill.ok { background: var(--goodbg); color: var(--good); } .pill.err { background: var(--badbg); color: var(--bad); }
+details summary { cursor: pointer; font-weight: 600; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+"use strict";
+/* PWR Live dashboard: reads the exports the app saves in its private folder and works out
+   live SPLH, the hour-by-hour picture, sales pace and what-ifs for one store. */
+const A = window.PWRApp || {
+  files: () => "[]", read: () => "", log: () => "[]", getPref: () => "", setPref() {}, tabs: () => "", setTabs() {},
+  grabUrl: () => "", lastCycle: () => 0, busy: () => false, useCurrentPwrPage: () => "", grabNow() {}, openPwr() {}, keepScreenOn() {}, isKeepScreenOn: () => false,
+};
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const money = v => v == null || !isFinite(v) ? "–" : (v < 0 ? "-$" : "$") + Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const hrs = v => v == null || !isFinite(v) ? "–" : (Math.round(v * 10) / 10).toFixed(1);
+const clock = d => d ? d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) : "–";
+const ago = t => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? "just now" : m === 1 ? "1 min ago" : m < 120 ? m + " min ago" : Math.round(m / 60) + " h ago"; };
+const pref = (k, d) => A.getPref(k) || d;
+const norm = s => String(s ?? "").toLowerCase().replace(/[^a-z0-9#%]/g, "");
+const num = v => { if (v == null || v === "") return null; if (typeof v === "number") return v; let t = String(v).trim(); const neg = /^\(.*\)$/.test(t); t = t.replace(/[$,%()\s]/g, ""); const n = parseFloat(t); return isFinite(n) ? (neg ? -n : n) : null; };
+
+/* ---------- Reading files ---------- */
+function loadFiles() {
+  const out = [];
+  let list = [];
+  try { list = JSON.parse(A.files()); } catch (e) {}
+  for (const f of list) {
+    try {
+      const b64 = A.read(f.name); if (!b64) continue;
+      const wb = XLSX.read(b64, { type: "base64", cellDates: true });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null }).filter(r => r.some(c => c != null && String(c).trim() !== ""));
+      out.push({ ...f, rows });
+    } catch (e) { out.push({ ...f, rows: [], err: String(e) }); }
+  }
+  return out;
+}
+const headerIdx = rows => { for (let i = 0; i < Math.min(rows.length, 10); i++) if (rows[i].filter(c => typeof c === "string" && /[a-z]/i.test(c)).length >= 3) return i; return 0; };
+const col = (hdr, ...pats) => hdr.findIndex(h => pats.some(p => p instanceof RegExp ? p.test(String(h ?? "")) : norm(h) === norm(p)));
+
+function classify(f) {
+  const hi = headerIdx(f.rows), hdr = (f.rows[hi] || []).map(h => String(h ?? "").trim()), body = f.rows.slice(hi + 1);
+  const H = hdr.map(norm);
+  if (H.includes(norm("Hour (Local Time)"))) return { type: "hourly", hdr, body };
+  if (H.includes("store") && H.some(h => h.startsWith("todaysroyaltysales"))) return { type: "sales", hdr, body };
+  if (H.some(h => h.includes("currentlaborhours"))) return { type: "labor", hdr, body };
+  if (/schedule/i.test(f.name) || H.some(h => /clock|punch|shift|sched/.test(h))) return { type: "schedule", hdr, body };
+  return { type: "other", hdr, body };
+}
+
+/* ---------- Time helpers ---------- */
+function hourSpan(label) {
+  const m = String(label).trim().match(/^(\d{1,2})(?::(\d\d))?\s*([AP])M?\s*-\s*(\d{1,2})(?::(\d\d))?\s*([AP])M?$/i); if (!m) return null;
+  const to24 = (h, mm, ap) => (+h % 12 + (ap.toUpperCase() === "P" ? 12 : 0)) + (+(mm || 0)) / 60;
+  const a = to24(m[1], m[2], m[3]); let b = to24(m[4], m[5], m[6]); if (b <= a) b += 24;
+  return { a, b };
+}
+// Business day starts at 6 AM; times before then belong to the previous calendar day's business.
+function businessStart(now = new Date()) { const d = new Date(now); if (d.getHours() < 6) d.setDate(d.getDate() - 1); d.setHours(0, 0, 0, 0); return d; }
+function atHour(h) { const d = businessStart(); d.setTime(d.getTime() + h * 3600e3); return d; }
+function parseTime(v, after) {
+  if (v == null || v === "") return null;
+  let h = null, mi = 0, d = null;
+  if (v instanceof Date) { if (v.getFullYear() >= 1950) d = new Date(v); else { h = v.getHours(); mi = v.getMinutes(); } }
+  else if (typeof v === "number") {
+    if (v > 1) { const u = new Date(Math.round((v - 25569) * 86400e3)); d = new Date(u.getTime() + u.getTimezoneOffset() * 60000); }
+    else { const m = Math.round(v * 1440); h = Math.floor(m / 60); mi = m % 60; }
+  } else {
+    const m = String(v).match(/(\d{1,2}):(\d\d)\s*([AP])\.?M?/i);
+    if (m) { h = (+m[1] % 12) + (m[3].toUpperCase() === "P" ? 12 : 0); mi = +m[2]; }
+    else { const x = new Date(v); if (!isNaN(x)) d = x; }
+  }
+  // A bare time belongs to today's business day (6 AM to 6 AM).
+  if (!d && h != null) { d = businessStart(); d.setTime(d.getTime() + ((h < 6 ? h + 24 : h) * 60 + mi) * 60000); }
+  if (!d) return null;
+  if (after && d < after) d = new Date(d.getTime() + 86400e3);
+  return d;
+}
+
+/* ---------- Analysis ---------- */
+function analyze(files, store) {
+  const now = new Date();
+  const res = { files, hourly: null, sales: null, schedule: null, labor: null, notes: [] };
+  for (const f of files) {
+    const c = classify(f); f.kind = c.type;
+    if (c.type === "hourly") res.hourly = readHourly(c, new Date(Math.min(now, f.modified || now)));
+    if (c.type === "sales") res.sales = readSales(c, store);
+    if (c.type === "schedule") res.schedule = readSchedule(c, now);
+    if (c.type === "labor") res.labor = c;
+  }
+  // Sales right now: Real Time Sales if grabbed, else the hourly total.
+  res.salesNow = res.sales?.today ?? res.hourly?.sales ?? null;
+  // Labor hours: real clock times (TM Schedule) are exact; the hourly crew counts are an estimate.
+  if (res.schedule && res.schedule.hoursNow > 0) { res.laborNow = res.schedule.hoursNow; res.laborSource = "clock times (TM Schedule)"; }
+  else if (res.hourly && res.hourly.labor > 0) { res.laborNow = res.hourly.labor; res.laborSource = "hourly crew counts (estimate; usually a little high)"; }
+  res.splh = res.salesNow != null && res.laborNow ? res.salesNow / res.laborNow : null;
+  // Close: scheduled hours still to come and last year's remaining sales.
+  if (res.schedule) res.laborClose = res.laborNow + res.schedule.remaining;
+  if (res.sales && res.sales.pyEod != null && res.sales.pyST != null) res.lyRest = Math.max(0, res.sales.pyEod - res.sales.pyST);
+  return res;
+}
+
+function readHourly(c, now) {
+  const H = c.hdr;
+  const iH = col(H, "Hour (Local Time)"), iS = col(H, /today'?s royalty sales/i, /royalty sales/i), iDE = col(H, "# DE"), iIn = col(H, "# Inside"),
+    iAs = col(H, /as of/i), iPy = col(H, /py st royalty/i), iOrd = col(H, /ord cnt/i), iDel = col(H, /delv cnt/i), iAdt = col(H, /^eadt$/i);
+  const rows = [];
+  for (const r of c.body) {
+    const sp0 = hourSpan(r[iH]); if (!sp0) continue;
+    const sp = sp0.a < 6 ? { a: sp0.a + 24, b: sp0.b + 24 } : sp0; // after-midnight hours
+    const de = num(r[iDE]) || 0, ins = num(r[iIn]) || 0, crew = de + ins;
+    const start = atHour(sp.a), end = atHour(sp.b);
+    const asOf = iAs >= 0 ? parseTime(r[iAs]) : null;
+    const until = now < end ? (asOf && asOf > start && asOf < end ? asOf : now) : end; // current hour: only the time so far
+    const h = Math.max(0, (until - start) / 3600e3);
+    rows.push({ label: String(r[iH]).trim(), sales: num(r[iS]) ?? 0, py: iPy >= 0 ? num(r[iPy]) : null, orders: num(r[iOrd]), deliveries: num(r[iDel]), eadt: num(r[iAdt]),
+      de, ins, crew, hours: crew * h, current: now >= start && now < end, asOf });
+  }
+  const sales = rows.reduce((a, r) => a + r.sales, 0), labor = rows.reduce((a, r) => a + r.hours, 0);
+  return { rows, sales, labor, splh: labor ? sales / labor : null, cols: c.hdr };
+}
+
+function readSales(c, store) {
+  const H = c.hdr, iSt = col(H, "Store"), iT = col(H, /^today'?s royalty sales$/i), iPy = col(H, /py royalty sales \(st\)/i), iEod = col(H, /py royalty sales \(eod\)/i);
+  const row = c.body.find(r => String(r[iSt] ?? "").replace(/\D/g, "") === String(store)) || (c.body.length === 1 ? c.body[0] : null);
+  if (!row) return null;
+  return { today: num(row[iT]), pyST: num(row[iPy]), pyEod: num(row[iEod]) };
+}
+
+// TM Schedule export: one row per shift with clock-in/out and scheduled times. Column names are
+// matched loosely; a range like "4:03 PM - 1:30 AM" in one cell also works.
+function readSchedule(c, now) {
+  const H = c.hdr.map(h => h.toLowerCase());
+  const find = (...res) => H.findIndex(h => res.every(re => re.test(h)));
+  const iName = H.findIndex(h => /name|team member|employee|^tm$/.test(h));
+  const iRole = H.findIndex(h => /position|role|job|type/.test(h));
+  const iSIn = find(/sched/, /(in|start|begin)/), iSOut = find(/sched/, /(out|end|stop)/);
+  const iIn = H.findIndex((h, i) => i !== iSIn && /(clock|punch|actual|time)?\s*(in|start)\b/.test(h) && !/sched/.test(h));
+  const iOut = H.findIndex((h, i) => i !== iSOut && /(clock|punch|actual|time)?\s*(out|end)\b/.test(h) && !/sched/.test(h));
+  const shifts = [];
+  for (const r of c.body) {
+    let inT = iIn >= 0 ? parseTime(r[iIn]) : null, outT = iOut >= 0 ? parseTime(r[iOut], inT) : null;
+    let sIn = iSIn >= 0 ? parseTime(r[iSIn]) : null, sOut = iSOut >= 0 ? parseTime(r[iSOut], sIn) : null;
+    if (!inT && !sIn) { // look for "a - b" ranges in any cell
+      const ranges = r.map(v => String(v ?? "").match(/(\d{1,2}:\d\d\s*[AP]M)\s*-\s*(\d{1,2}:\d\d\s*[AP]M)/i)).filter(Boolean);
+      if (ranges[0]) { inT = parseTime(ranges[0][1]); outT = parseTime(ranges[0][2], inT); }
+      if (ranges[1]) { sIn = parseTime(ranges[1][1]); sOut = parseTime(ranges[1][2], sIn); }
+    }
+    if (!inT && !sIn) continue;
+    const name = iName >= 0 ? String(r[iName] ?? "").trim() : String(r.find(v => typeof v === "string" && /[a-z]/i.test(v)) ?? "");
+    const role = iRole >= 0 ? String(r[iRole] ?? "") : (name.match(/\((.*?)\)/) || [])[1] || "";
+    const working = inT && (!outT || outT > now);
+    const end = working ? now : outT;
+    const worked = inT ? Math.max(0, (end - inT) / 3600e3) : 0;
+    const left = working && sOut && sOut > now ? (sOut - now) / 3600e3 : 0;
+    shifts.push({ name, role, inT, outT: working ? null : outT, sIn, sOut, working, worked, left });
+  }
+  if (!shifts.length) return null;
+  return { shifts, hoursNow: shifts.reduce((a, s) => a + s.worked, 0), remaining: shifts.reduce((a, s) => a + s.left, 0), cols: c.hdr };
+}
+
+/* ---------- Rendering ---------- */
+let state = { open: {} };
+function render() {
+  const store = pref("store", "2058"), goal = +pref("goal", "61");
+  const files = loadFiles();
+  const R = analyze(files, store);
+  const last = A.lastCycle(), grabUrl = A.grabUrl();
+  const parts = [];
+
+  parts.push(`<div class="row" style="justify-content:space-between">
+    <div><b style="font-size:18px">Store ${esc(store)}</b> <span class="muted">goal ${money(goal)} SPLH</span></div>
+    <div class="muted">${A.busy() ? "Grabbing…" : last ? "Last grab " + ago(last) : "Not grabbed yet"}</div></div>`);
+
+  if (!grabUrl) {
+    parts.push(`<div class="card" style="margin-top:10px"><b>Set up (one time)</b>
+      <ol style="margin:8px 0 10px;padding-left:20px">
+        <li>Tap <b>PWR</b> at the top and sign in.</li>
+        <li>Open <b>Real Time</b> with store ${esc(store)} selected.</li>
+        <li>Come back here and tap <b>Use this PWR page</b>.</li></ol>
+      <button class="btn primary" onclick="useHere()">Use this PWR page</button> <button class="btn" onclick="PWRApp.openPwr()">Open PWR</button></div>`);
+  }
+
+  // Headline numbers.
+  const k = [];
+  k.push(kpi("SPLH now", R.splh != null ? money(R.splh) : "–", R.splh != null ? vsGoal(R.splh, goal) : "Needs sales + labor exports",
+    R.laborNow ? `${money(R.salesNow)} on ${hrs(R.laborNow)} labor hrs` : ""));
+  k.push(kpi("Sales so far", money(R.salesNow), R.sales && R.sales.pyST ? pct(R.salesNow, R.sales.pyST) + " vs last year" : "", R.sales && R.sales.pyEod ? `Last year's full day ${money(R.sales.pyEod)}` : ""));
+  const cur = R.hourly?.rows.find(r => r.current), lastDone = R.hourly ? [...R.hourly.rows].reverse().find(r => !r.current && r.hours > 0) : null;
+  const hRow = cur && cur.hours > 0.15 ? cur : lastDone;
+  if (hRow) k.push(kpi(hRow.current ? `This hour (${hRow.label}, so far)` : `Last hour (${hRow.label})`, money(hRow.sales / hRow.hours), vsGoal(hRow.sales / hRow.hours, goal), `${money(hRow.sales)} on ${hrs(hRow.hours)} hrs, crew ${hrs(hRow.crew)}`));
+  if (R.laborClose) {
+    const projSales = R.salesNow + (R.lyRest ?? 0);
+    k.push(kpi("At close (on schedule)", money(projSales / R.laborClose), R.lyRest != null ? `if late sales match last year (+${money(R.lyRest)})` : "if no more sales", `${hrs(R.laborClose)} labor hrs total`));
+  }
+  parts.push(`<div class="grid" style="margin-top:10px">${k.join("")}</div>`);
+  if (R.laborSource) parts.push(`<div class="muted" style="margin-top:6px">Labor hours from ${esc(R.laborSource)}.</div>`);
+
+  // Alerts / what to do.
+  const al = [];
+  if (R.splh != null) {
+    if (R.splh < goal) al.push(["bad", `SPLH is ${money(goal - R.splh)} under goal. Covering the gap needs ${money(goal * R.laborNow - R.salesNow)} more sales at current labor.`]);
+    else al.push(["good", `SPLH is ${money(R.splh - goal)} over goal. You can use ${hrs(R.salesNow / goal - R.laborNow)} more labor hours before dropping under ${money(goal)}.`]);
+  }
+  if (R.laborClose && R.salesNow != null) {
+    const need = goal * R.laborClose - R.salesNow;
+    al.push([need > (R.lyRest ?? 0) ? "warn" : "good", need > 0 ? `To finish at ${money(goal)} with everyone leaving on schedule: ${money(need)} more sales${R.lyRest != null ? ` (last year did ${money(R.lyRest)} from here)` : ""}.` : `Goal for the day is already locked in, even with no more sales.`]);
+    al.push(["warn", `If no more sales come in, the day finishes at ${money(R.salesNow / R.laborClose)}.`]);
+  }
+  if (hRow && hRow.crew > 0) {
+    const perHour = hRow.current ? hRow.sales / Math.max(0.25, hRow.hours / hRow.crew) : hRow.sales;
+    const supports = perHour / goal;
+    if (supports < hRow.crew - 0.75) al.push(["warn", `${hRow.label}: sales support about ${hrs(supports)} people at ${money(goal)}; ${hrs(hRow.crew)} on.`]);
+  }
+  if (al.length) parts.push(`<h2>What it means</h2>` + al.map(([c, t]) => `<div class="al ${c}">${esc(t)}</div>`).join(""));
+
+  // What-if: someone leaves now.
+  if (R.schedule) {
+    const on = R.schedule.shifts.filter(s => s.working);
+    const projSales = R.salesNow + (R.lyRest ?? 0);
+    if (on.length && R.laborClose) {
+      parts.push(`<h2>If someone leaves now</h2><div class="card scroll"><table><tr><th>Team member</th><th>Scheduled out</th><th>Hours saved</th><th>Day SPLH</th></tr>` +
+        on.map(s => `<tr><td>${esc(s.name)}${s.role && !s.name.includes(s.role) ? ` <span class="muted">${esc(s.role)}</span>` : ""}</td><td>${clock(s.sOut)}</td><td>${hrs(s.left)}</td><td>${money(projSales / (R.laborClose - s.left))}</td></tr>`).join("") +
+        `</table><div class="muted" style="margin-top:6px">Day SPLH assumes late sales match last year${R.lyRest == null ? " (no Real Time Sales export yet, so: no more sales)" : ""}.</div></div>`);
+    }
+  }
+
+  // Hour by hour.
+  if (R.hourly) {
+    parts.push(`<h2>Hour by hour</h2><div class="card scroll"><table><tr><th>Hour</th><th>Sales</th><th>vs LY</th><th>DE+In</th><th>Labor</th><th>SPLH</th><th>eADT</th></tr>` +
+      R.hourly.rows.map(r => { const s = r.hours > 0 ? r.sales / r.hours : null; const cls = s == null ? "" : s >= goal ? "good" : s >= goal * 0.8 ? "warn" : "bad";
+        return `<tr><td>${esc(r.label)}${r.current ? " ●" : ""}</td><td>${money(r.sales)}</td><td>${r.py ? pct(r.sales, r.py) : "–"}</td><td>${hrs(r.de)}+${hrs(r.ins)}</td><td>${hrs(r.hours)}</td><td class="${cls}">${s != null ? money(s) : "–"}</td><td>${r.eadt != null ? r.eadt.toFixed(1) : "–"}</td></tr>`; }).join("") +
+      `<tr><th>Day</th><th>${money(R.hourly.sales)}</th><th></th><th></th><th>${hrs(R.hourly.labor)}</th><th>${money(R.hourly.splh)}</th><th></th></tr></table>
+      <div class="muted" style="margin-top:6px">Labor here = (# DE + # Inside) × hours in the block; ● is the current hour, counted so far.</div></div>`);
+  }
+
+  // Shifts.
+  if (R.schedule) {
+    parts.push(`<h2>Shifts (from TM Schedule)</h2><div class="card scroll"><table><tr><th>Team member</th><th>In</th><th>Out</th><th>Sched out</th><th>Hours</th></tr>` +
+      R.schedule.shifts.map(s => `<tr><td>${esc(s.name)}</td><td>${clock(s.inT)}</td><td>${s.working ? "on" : clock(s.outT)}</td><td>${clock(s.sOut)}</td><td>${hrs(s.worked)}</td></tr>`).join("") +
+      `<tr><th>Total so far</th><th></th><th></th><th></th><th>${hrs(R.schedule.hoursNow)}</th></tr></table></div>`);
+  }
+
+  // Files and grab log.
+  const log = (() => { try { return JSON.parse(A.log()); } catch (e) { return []; } })();
+  parts.push(`<h2>Reports folder</h2><div class="card">` +
+    (files.length ? files.map(f => `<div class="row" style="justify-content:space-between;margin-bottom:4px"><span>${esc(f.name)} <span class="muted">${esc(f.kind || "")}</span></span><span class="muted">${ago(f.modified)}</span></div>`).join("")
+      : `<div class="muted">No reports yet. They appear here after the first grab.</div>`) +
+    `<div class="row" style="margin-top:8px"><button class="btn primary" onclick="PWRApp.grabNow();setTimeout(render,500)">Grab now</button><button class="btn" onclick="PWRApp.openPwr()">Open PWR</button><button class="btn" onclick="useHere()">Use this PWR page</button></div></div>`);
+  parts.push(`<details class="card" style="margin-top:10px" ${state.open.log ? "open" : ""} ontoggle="state.open.log=this.open"><summary>Grab log</summary>` +
+    (log.length ? log.slice(0, 25).map(e => `<div style="margin-top:6px"><span class="pill ${e.kind === "ok" ? "ok" : "err"}">${e.kind === "ok" ? "ok" : "problem"}</span> <b>${esc(e.tab || "")}</b> ${esc(e.msg)} <span class="muted">${ago(e.t)}</span></div>`).join("") : `<div class="muted">Nothing yet.</div>`) +
+    `</details>`);
+  // Raw previews help when an export has columns the app doesn't recognize yet.
+  parts.push(`<details class="card" style="margin-top:10px" ${state.open.raw ? "open" : ""} ontoggle="state.open.raw=this.open"><summary>Report previews</summary>` +
+    files.map(f => `<div style="margin-top:8px"><b>${esc(f.name)}</b> <span class="muted">${f.err ? esc(f.err) : f.rows.length + " rows"}</span><div class="scroll"><table>` +
+      f.rows.slice(0, 6).map(r => `<tr>${r.slice(0, 10).map(c => `<td>${esc(c instanceof Date ? c.toLocaleString() : c)}</td>`).join("")}</tr>`).join("") + `</table></div></div>`).join("") + `</details>`);
+  parts.push(`<details class="card" style="margin-top:10px" ${state.open.set ? "open" : ""} ontoggle="state.open.set=this.open"><summary>Settings</summary>
+    <div class="row" style="margin-top:8px"><label>Store <input id="store" value="${esc(store)}" size="6" onchange="PWRApp.setPref('store',this.value);render()"></label>
+    <label>SPLH goal $<input id="goal" value="${esc(goal)}" size="5" inputmode="decimal" onchange="PWRApp.setPref('goal',this.value);render()"></label></div>
+    <div style="margin-top:8px"><label>Tabs to grab (names as shown in PWR, comma-separated)<br><input id="tabs" style="width:100%" value="${esc(A.tabs())}" onchange="PWRApp.setTabs(this.value)"></label></div>
+    <div class="row" style="margin-top:8px"><label><input type="checkbox" ${A.isKeepScreenOn() ? "checked" : ""} onchange="PWRApp.keepScreenOn(this.checked)"> Keep screen on while open</label></div>
+    <div class="muted" style="margin-top:8px">Grabs run every 2 minutes while the app is open. Page: ${esc(grabUrl || "not set")}</div></details>`);
+
+  $("#app").innerHTML = parts.join("");
+}
+function kpi(l, v, n, n2) { return `<div class="card kpi"><div class="l">${esc(l)}</div><div class="v">${v}</div><div class="n">${n || ""}</div>${n2 ? `<div class="n">${esc(n2)}</div>` : ""}</div>`; }
+function vsGoal(v, goal) { const d = v - goal; return `<span class="${d >= 0 ? "up" : "down"}">${d >= 0 ? "▲" : "▼"} ${money(Math.abs(d))} vs goal</span>`; }
+function pct(a, b) { if (a == null || !b) return "–"; const p = (a - b) / b * 100; return `<span class="${p >= 0 ? "up" : "down"}">${p >= 0 ? "+" : ""}${p.toFixed(1)}%</span>`; }
+function useHere() {
+  const u = A.useCurrentPwrPage();
+  if (!u) { const el = document.createElement("div"); el.className = "al warn"; el.textContent = "Open PWR first, sign in, and go to the Real Time page for your store. Then come back and tap Use this PWR page."; document.body.prepend(el); return; }
+  setTimeout(render, 300);
+}
+window.refresh = () => { try { render(); } catch (e) { $("#app").innerHTML = `<div class="al bad">${esc(e.stack || e)}</div>`; } };
+window.refresh();
+setInterval(window.refresh, 30000);
+</script>
+</body>
+</html>

@@ -1,0 +1,38 @@
+name: Build PWR Live app
+
+on:
+  push:
+    paths:
+      - "android/**"
+      - ".github/workflows/android.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.14.3"
+      - name: Build APK
+        working-directory: android
+        env:
+          PWR_VERSION_CODE: ${{ github.run_number }}
+        run: gradle --no-daemon assembleDebug
+      - name: Publish to the "pwr-live-latest" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk pwr-live.apk
+          gh release view pwr-live-latest >/dev/null 2>&1 || \
+            gh release create pwr-live-latest --prerelease --title "PWR Live (latest)" \
+              --notes "Install pwr-live.apk on your Android phone. Each new build replaces this file."
+          gh release upload pwr-live-latest pwr-live.apk --clobber

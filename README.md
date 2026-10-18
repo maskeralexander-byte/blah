@@ -63,3 +63,15 @@ node tools/build.js
 ```
 
 The bookmark loads `live/pwr-live.min.js` from jsDelivr at this branch, so pushing a new build updates everyone's bookmark. jsDelivr caches branch files for a while; after pushing, refresh it with the `curl https://purge.jsdelivr.net/...` command that `tools/build.js` prints.
+
+## PWR Live Android app (android/)
+
+An Android app that keeps PWR's exports current on its own and analyzes them for one store.
+
+- **PWR tab:** pwr.dominos.com in a built-in browser. You sign in there yourself; the app keeps the session like a browser does and never stores your password.
+- **Grabbing:** every 2 minutes while the app is open, a hidden copy of PWR opens the page you chose ("Use this PWR page"), taps each tab in the list (default: Sales, Labor, Hourly Sales, TM Schedule) and taps its XLS button. The file is caught as it downloads (link, in-page file, or inline data) and saved in the app's private **PWR Live** folder as `<Tab>.xlsx`, replacing the previous copy. Nothing else is tapped and your own PWR view isn't touched.
+- **Dashboard:** live SPLH using actual clock-in/out times from the TM Schedule export (falls back to Hourly Sales crew counts), sales vs last year, this hour's SPLH, what it takes to finish the day at your goal, "if someone leaves now" what-ifs, hour-by-hour SPLH, shifts, the reports folder and a grab log.
+- **Install:** download `pwr-live.apk` from the repository's "PWR Live (latest)" release and open it on your phone (allow installing from your browser when Android asks). New builds install over the old one.
+- **Build:** `.github/workflows/android.yml` builds on every push that changes `android/`. Locally: `cd android && gradle assembleDebug` with the Android SDK (platform 34) installed.
+
+Grabs only run while the app is open (the "Keep screen on" setting helps). Check your franchise's rules on automated use of PWR.
