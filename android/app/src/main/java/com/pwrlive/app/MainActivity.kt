@@ -295,7 +295,7 @@ class MainActivity : Activity() {
     // PWR opens on the team view (all stores added together). Pick the store the way a person
     // would: team selector -> Select from List -> check the store -> Apply. Skipped when the
     // selector already shows the store.
-    private fun selectStore(then: () -> Unit, tries: Int = 0) {
+    private fun selectStore(tries: Int = 0, then: () -> Unit) {
         val store = prefs.getString("p_store", null)?.trim()?.takeIf { it.isNotEmpty() } ?: "2058"
         grabView.evaluateJavascript(storeJs(store, "open")) { r ->
             val v = r?.trim('"') ?: ""
@@ -303,7 +303,7 @@ class MainActivity : Activity() {
                 v.startsWith("already") -> then()
                 v.startsWith("opened") -> ui.postDelayed({ storeList(store, 0, then) }, 2500)
                 // The page may still be loading; give it a few more seconds.
-                tries < 3 -> ui.postDelayed({ selectStore(then, tries + 1) }, 4000)
+                tries < 3 -> ui.postDelayed({ selectStore(tries + 1, then) }, 4000)
                 else -> { log("error", "Store", "Couldn't find the store picker. ${v.substringAfter('|', "").take(300)}"); then() }
             }
         }
